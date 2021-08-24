@@ -1,0 +1,3 @@
+[submodule "hwb/ulib"]
+	path = hwb/ulib
+	url = https://github.com/fujitsu/hardware_barrier
