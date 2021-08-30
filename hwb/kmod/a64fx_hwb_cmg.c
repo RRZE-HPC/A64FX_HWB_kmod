@@ -20,11 +20,9 @@ static ssize_t core_map_show(struct kobject *kobj, struct kobj_attribute * attr,
     int i = 0;
     int slen = 0;
     struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
-    pr_info("Fujitsu HWB: Core_map for CMG%d with %d PEs\n", cmg->cmg_id, cmg->num_pes);
     for (i = 0; i < cmg->num_pes; i++)
     {
         slen += snprintf(&buf[slen], PAGE_SIZE-slen, "%d %d\n", cmg->pe_map[i].cpu_id, cmg->pe_map[i].ppe_id);
-        pr_info("Fujitsu HWB: CMG %d CPU %d PPE %d\n", cmg->cmg_id, cmg->pe_map[i].cpu_id, cmg->pe_map[i].ppe_id);
     }
     buf[slen] = '\0';
     return slen;
@@ -33,7 +31,7 @@ static ssize_t core_map_show(struct kobject *kobj, struct kobj_attribute * attr,
 static ssize_t used_bb_bmap_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
 {
     struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
-    return scnprintf(buf, PAGE_SIZE, "%.4x\n", cmg->bb_active);
+    return scnprintf(buf, PAGE_SIZE, "%.4lx\n", cmg->bb_active);
 }
 
 static ssize_t used_bw_bmap_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
@@ -56,10 +54,50 @@ static ssize_t init_sync_bb0_show(struct kobject *kobj, struct kobj_attribute * 
     return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
 }
 
+static ssize_t init_sync_bb1_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
+{
+    u32 mask = 0x0U;
+    u32 bst = 0x0U;
+    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+}
+
+static ssize_t init_sync_bb2_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
+{
+    u32 mask = 0x0U;
+    u32 bst = 0x0U;
+    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+}
+
+static ssize_t init_sync_bb3_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
+{
+    u32 mask = 0x0U;
+    u32 bst = 0x0U;
+    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+}
+
+static ssize_t init_sync_bb4_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
+{
+    u32 mask = 0x0U;
+    u32 bst = 0x0U;
+    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+}
+
+static ssize_t init_sync_bb5_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
+{
+    u32 mask = 0x0U;
+    u32 bst = 0x0U;
+    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+}
+
 static struct kobj_attribute core_map_attr = __ATTR(core_map, 0444, core_map_show, NULL);
 static struct kobj_attribute used_bb_map_attr = __ATTR(used_bb_bmap, 0444, used_bb_bmap_show, NULL);
 static struct kobj_attribute used_bw_map_attr = __ATTR(used_bw_bmap, 0444, used_bw_bmap_show, NULL);
 static struct kobj_attribute init_sync_bb0_attr = __ATTR(init_sync_bb0, 0400, init_sync_bb0_show, NULL);
+static struct kobj_attribute init_sync_bb1_attr = __ATTR(init_sync_bb1, 0400, init_sync_bb1_show, NULL);
+static struct kobj_attribute init_sync_bb2_attr = __ATTR(init_sync_bb2, 0400, init_sync_bb2_show, NULL);
+static struct kobj_attribute init_sync_bb3_attr = __ATTR(init_sync_bb3, 0400, init_sync_bb3_show, NULL);
+static struct kobj_attribute init_sync_bb4_attr = __ATTR(init_sync_bb4, 0400, init_sync_bb4_show, NULL);
+static struct kobj_attribute init_sync_bb5_attr = __ATTR(init_sync_bb5, 0400, init_sync_bb5_show, NULL);
 struct kobj_type* kobjtype = NULL;
 
 
@@ -112,11 +150,41 @@ int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* par
         pr_err("Cannot create init_sync_bb0 for CMG%d\n", cmg_id);
         return ret;
     }
+    ret = sysfs_create_file(&dev->kobj, &init_sync_bb1_attr.attr);
+    if(ret){
+        pr_err("Cannot create init_sync_bb1 for CMG%d\n", cmg_id);
+        return ret;
+    }
+    ret = sysfs_create_file(&dev->kobj, &init_sync_bb2_attr.attr);
+    if(ret){
+        pr_err("Cannot create init_sync_bb2 for CMG%d\n", cmg_id);
+        return ret;
+    }
+    ret = sysfs_create_file(&dev->kobj, &init_sync_bb3_attr.attr);
+    if(ret){
+        pr_err("Cannot create init_sync_bb3 for CMG%d\n", cmg_id);
+        return ret;
+    }
+    ret = sysfs_create_file(&dev->kobj, &init_sync_bb4_attr.attr);
+    if(ret){
+        pr_err("Cannot create init_sync_bb4 for CMG%d\n", cmg_id);
+        return ret;
+    }
+    ret = sysfs_create_file(&dev->kobj, &init_sync_bb5_attr.attr);
+    if(ret){
+        pr_err("Cannot create init_sync_bb5 for CMG%d\n", cmg_id);
+        return ret;
+    }
     return 0;
 }
 
 void destroy_cmg(struct a64fx_cmg_device* dev)
 {
+    sysfs_remove_file(&dev->kobj, &init_sync_bb5_attr.attr);
+    sysfs_remove_file(&dev->kobj, &init_sync_bb4_attr.attr);
+    sysfs_remove_file(&dev->kobj, &init_sync_bb3_attr.attr);
+    sysfs_remove_file(&dev->kobj, &init_sync_bb2_attr.attr);
+    sysfs_remove_file(&dev->kobj, &init_sync_bb1_attr.attr);
     sysfs_remove_file(&dev->kobj, &init_sync_bb0_attr.attr);
     sysfs_remove_file(&dev->kobj, &used_bw_map_attr.attr);
     sysfs_remove_file(&dev->kobj, &used_bb_map_attr.attr);

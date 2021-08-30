@@ -3,6 +3,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/slab.h>
 #include <include/linux/smp.h>
 #include <include/linux/cpumask.h>
 
@@ -30,6 +31,226 @@ static int pemask_to_cpumask(size_t pemask_size, unsigned long *pemask, struct c
         }
     }
     return count;
+}
+
+static int check_cpumask(struct a64fx_hwb_device *dev, struct cpumask cpumask)
+{
+    int i = 0;
+    int j = 0;
+    int cpu = -1;
+    int cmg = -1;
+    for_each_cpu(cpu, &cpumask)
+    {
+        for (i = 0; i < dev->num_cmgs; i++)
+        {
+            for (j = 0; j < dev->cmgs[i].num_pes; j++)
+            {
+                if (dev->cmgs[i].pe_map[j].cpu_id == cpu)
+                {
+                    if (cmg < 0)
+                    {
+                        cmg = dev->cmgs[i].pe_map[j].cmg_id;
+                    }
+                    if (cmg != dev->cmgs[i].pe_map[j].cmg_id)
+                    {
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+static int cpumask_online(struct cpumask cpumask)
+{
+    int cpu = -1;
+    for_each_cpu(cpu, &cpumask)
+    {
+        if (!cpu_online(cpu))
+        {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static struct a64fx_task_allocation * get_allocation(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap, int cmg, int bb)
+{
+    struct list_head *cur = NULL;
+    struct a64fx_task_allocation *alloc = NULL;
+    list_for_each(cur, &taskmap->allocs)
+    {
+        alloc = list_entry(cur, struct a64fx_task_allocation, list);
+        if (alloc->cmg == cmg && alloc->bb == bb)
+        {
+            return alloc;
+        }
+    }
+    return NULL;
+}
+
+static struct a64fx_task_allocation * new_allocation(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap, int cmg, int bb)
+{
+    struct a64fx_task_allocation *alloc = NULL;
+    alloc = get_allocation(dev, taskmap, cmg, bb);
+    if (alloc)
+    {
+        pr_info("Error allocation already exists\n");
+        return NULL;
+    }
+    alloc = kmalloc(sizeof(struct a64fx_task_allocation), GFP_KERNEL);
+    if (!alloc)
+    {
+        return NULL;
+    }
+    pr_info("New allocation\n");
+    alloc->cmg = (u8)cmg;
+    alloc->bb = (u8)bb;
+    alloc->win_mask = 0x0;
+    alloc->task = taskmap->task;
+    list_add(&alloc->list, &taskmap->allocs);
+    taskmap->num_allocs++;
+    return 0;
+}
+
+static struct a64fx_task_allocation * register_allocation(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap, int cmg, int bb)
+{
+    struct a64fx_task_allocation *alloc = NULL;
+    alloc = get_allocation(dev, taskmap, cmg, bb);
+    if (!alloc)
+    {
+        alloc = new_allocation(dev, taskmap, cmg, bb);
+    }
+    return alloc;
+}
+
+static int free_allocation(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap, struct a64fx_task_allocation* alloc)
+{
+    int cmg_id = alloc->cmg;
+    if (test_bit(alloc->bb, &dev->cmgs[cmg_id].bb_active))
+    {
+        pr_info("Free BB %d at CMG %d\n", alloc->bb, alloc->cmg);
+        clear_bit(alloc->bb, &dev->cmgs[cmg_id].bb_active);
+    }
+    list_del(&alloc->list);
+    kfree(alloc);
+    taskmap->num_allocs--;
+    return 0;
+}
+
+static struct a64fx_task_mapping * get_taskmap(struct a64fx_hwb_device *dev, struct task_struct* task)
+{
+    struct list_head* cur = NULL;
+    struct a64fx_task_mapping *taskmap = NULL;
+    pr_info("Get task %d\n", task->pid);
+    list_for_each(cur, &dev->task_list)
+    {
+        taskmap = list_entry(cur, struct a64fx_task_mapping, list);
+        if (taskmap->task == task)
+        {
+            return taskmap;
+        }
+    }
+    return NULL;
+}
+
+static struct a64fx_task_mapping * new_taskmap(struct a64fx_hwb_device *dev, struct task_struct* task, struct cpumask cpumask)
+{
+    struct a64fx_task_mapping *taskmap = NULL;
+    taskmap = get_taskmap(dev, task);
+    if (taskmap)
+    {
+        pr_info("Error task already exists\n");
+        return NULL;
+    }
+    taskmap = kmalloc(sizeof(struct a64fx_task_mapping), GFP_KERNEL);
+    if (!taskmap)
+    {
+        return NULL;
+    }
+    pr_info("New task %d\n", task->pid);
+    taskmap->task = task;
+    //refcount_set(&taskmap->refcount, 0);
+    taskmap->num_allocs = 0;
+    cpumask_copy(&taskmap->cpumask, &cpumask);
+    INIT_LIST_HEAD(&taskmap->list);
+    INIT_LIST_HEAD(&taskmap->allocs);
+    list_add(&taskmap->list, &dev->task_list);
+    dev->num_tasks++;
+    return taskmap;
+
+}
+
+static struct a64fx_task_mapping * register_task(struct a64fx_hwb_device *dev, struct task_struct* task, struct cpumask cpumask)
+{
+    struct a64fx_task_mapping *taskmap = NULL;
+/*    struct task_struct* current_task = get_current();*/
+    taskmap = get_taskmap(dev, task);
+    if (!taskmap)
+    {
+        taskmap = new_taskmap(dev, task, cpumask);
+    }
+    //refcount_inc(&taskmap->refcount);
+    return taskmap;
+}
+
+static int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap)
+{
+/*    struct list_head *cur = NULL, *tmp = NULL;*/
+/*    struct list_head *acur = NULL, *atmp = NULL;*/
+/*    struct a64fx_task_mapping *taskmap = NULL;*/
+/*    struct a64fx_task_allocation *alloc = NULL;*/
+/*    struct task_struct* current_task = get_current();*/
+/*    spin_lock(&dev->dev_lock);*/
+/*    taskmap = get_taskmap(dev, current_task);*/
+    if (taskmap)
+    {
+        list_del(&taskmap->list);
+        kfree(taskmap);
+        dev->num_tasks--;
+    }
+/*    list_for_each_safe(cur, tmp, &dev->task_list)*/
+/*    {*/
+/*        taskmap = list_entry(cur, struct a64fx_task_mapping, list);*/
+/*        if (taskmap->task == current_task)*/
+/*        {*/
+/*            pr_info("Task known, dec refcount\n");*/
+/*            if (refcount_dec_and_test(&taskmap->refcount))*/
+/*            {*/
+/*                // clean allocations*/
+/*                pr_info("Task known, refcount zero, delete task\n");*/
+/*                list_for_each_safe(acur, atmp, &taskmap->allocs)*/
+/*                {*/
+/*                    alloc = list_entry(acur, struct a64fx_task_allocation, list);*/
+/*                    free_allocation(dev, taskmap, alloc);*/
+/*                }*/
+/*                taskmap->num_allocs = 0;*/
+/*                list_del(&taskmap->list);*/
+/*                kfree(taskmap);*/
+/*                dev->num_tasks--;*/
+/*            }*/
+/*            break;*/
+/*        }*/
+/*    }*/
+/*    spin_unlock(&dev->dev_lock);*/
+    return 0;
+}
+
+static int valid_task(struct a64fx_hwb_device *dev)
+{
+    struct list_head *cur = NULL;
+    struct a64fx_task_mapping* taskmap = NULL;
+    struct task_struct* current_task = get_current();
+    list_for_each(cur, &dev->task_list)
+    {
+        taskmap = list_entry(cur, struct a64fx_task_mapping, list);
+        if (taskmap->task == current_task || taskmap->task == current_task->real_parent)
+        {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 #ifdef __x86_64__
@@ -73,6 +294,8 @@ int oss_a64fx_hwb_get_peinfo_ioctl(unsigned long arg)
         pr_err("Fujitsu HWB: Error to get pe_info data\n");
         return -1;
     }
+    ustruct.cmg = 0xFF;
+    ustruct.ppe = 0xFF;
     _oss_a64fx_hwb_get_peinfo(&ustruct.cmg, &ustruct.ppe);
     if (copy_to_user((struct fujitsu_hwb_ioc_pe_info __user *)arg, &ustruct, sizeof(struct fujitsu_hwb_ioc_pe_info)))
     {
@@ -85,15 +308,10 @@ int oss_a64fx_hwb_get_peinfo_ioctl(unsigned long arg)
 int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, unsigned long arg)
 {
     int err = 0;
-    int i = 0;
-    int j = 0;
-    int k = 0;
-    int new_task = 0;
     int cmg_id = -1;
-    int bb_id = -1;
     struct a64fx_cmg_device *cmg = NULL;
-    struct a64fx_task_mapping *task = NULL;
-    struct a64fx_task_allocation *alloc = NULL;
+    struct a64fx_task_mapping *taskmap = NULL;
+/*    struct a64fx_task_allocation *alloc = NULL;*/
     unsigned long mask;
     struct cpumask cpumask;
     struct fujitsu_hwb_ioc_bb_ctl ioc_bb_ctl = {0};
@@ -114,141 +332,85 @@ int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, unsigned long arg)
         return -1;
     }
     pr_info("Fujitsu HWB: Read pemask\n");
-    i = pemask_to_cpumask(ioc_bb_ctl.size, &mask, &cpumask);
-    if (i == 0)
+    spin_lock(&dev->dev_lock);
+    err = pemask_to_cpumask(ioc_bb_ctl.size, &mask, &cpumask);
+    if (err == 0)
     {
-        err = -EFAULT;
+        err = -EINVAL;
+        pr_err("Fujitsu HWB: cpumask empty\n");
         goto allocate_exit;
     }
-
-    for (i = 0; i < dev->num_tasks; i++)
+    err = check_cpumask(dev, cpumask);
+    if (err)
     {
-        if (current_task == dev->tasks[i].task)
-        {
-            task = &dev->tasks[i];
-        }
+        pr_err("Fujitsu HWB: cpumask spans multiple CMGs! Not allowed\n");
+        goto allocate_exit;
     }
-    if (!task)
+    err = cpumask_online(cpumask);
+    if (err)
     {
-        if ((dev->num_tasks == MAX_NUM_CMG*MAX_BB_PER_CMG))
+        pr_err("Fujitsu HWB: cpumask contains offline cpus\n");
+        goto allocate_exit;
+    }
+    taskmap = get_taskmap(dev, current_task);
+    if (!taskmap)
+    {
+        taskmap = new_taskmap(dev, current_task, cpumask);
+        if (!taskmap)
         {
-            task = &dev->tasks[dev->num_tasks];
-            new_task++;
-        }
-        else
-        {
-            err = -EBUSY;
+            pr_err("Fujitsu HWB: Failed to register task or get existing mapping\n");
+            err = -1;
             goto allocate_exit;
         }
     }
-    spin_lock(&dev->dev_lock);
-    task->task = current_task;
-    
-    alloc = &task->allocations[task->num_allocations];
-    ioc_bb_ctl.cmg = 0x0;
-    for_each_cpu(i, &cpumask)
-    {
-        for (j = 0; j < dev->num_cmgs; j++)
-        {
-            cmg = &dev->cmgs[j];
-            for (k = 0; k < cmg->num_pes; k++)
-            {
-                if (cmg->pe_map[k].cpu_id == i)
-                {
-                    if (cmg_id < 0)
-                    {
-                        cmg_id = cmg->pe_map[k].cmg_id;
-                    } else {
-                        pr_err("Fujitsu HWB: Allocation for multiple CMGs not allowed\n");
-                    }
-                }
-            }
-        }
-        cpumask_set_cpu(i, &alloc->cpumask);
-    }
+    cmg_id = (int)ioc_bb_ctl.cmg;
     cmg = &dev->cmgs[cmg_id];
-    for (i = 0; i < dev->num_bb_per_cmg; i++)
+    err = find_first_zero_bit(&cmg->bb_active, 64);
+    pr_info("Bit %d is zero, use it\n", err);
+    if (err >= 0 && err < dev->num_bb_per_cmg)
     {
-        
-        if (!(cmg->bb_active & (1<<i)))
-        {
-            spin_lock(&cmg->cmg_lock);
-            cmg->bb_active |= (1<<i);
-            bb_id = i;
-            alloc->bb = i;
-            alloc->cmg = cmg_id;
-            pr_info("Fujitsu HWB: Allocate BB %d at CMG%d\n", alloc->bb, alloc->cmg);
-            task->num_allocations++;
-            spin_unlock(&cmg->cmg_lock);
-            break;
-        }
+        register_allocation(dev, taskmap, cmg_id, err);
+        ioc_bb_ctl.bb = (u8)err;
+        ioc_bb_ctl.cmg = (u8)cmg_id;
+        err = 0;
     }
-    
-    dev->num_tasks += new_task;
-    spin_unlock(&dev->dev_lock);
+    else
+    {
+        err = -ENODEV;
+    }
+
 allocate_exit:
+    spin_unlock(&dev->dev_lock);
     if (copy_to_user((struct fujitsu_hwb_ioc_bb_ctl __user *)arg, &ioc_bb_ctl, sizeof(struct fujitsu_hwb_ioc_bb_ctl __user)))
     {
         pr_err("Fujitsu HWB: Error to copy back bb_ctl data\n");
         return -1;
     }
-    
-    // release lock
 
     return err;
 }
 
 int oss_a64fx_hwb_free(struct a64fx_hwb_device *dev, int cmg_id, int bb_id)
 {
-    int i = 0;
-    int j = 0;
-    struct a64fx_cmg_device *cmg = NULL;
-    struct a64fx_task_mapping *task = NULL;
+/*    int i = 0;*/
+/*    int j = 0;*/
+/*    struct a64fx_cmg_device *cmg = NULL;*/
+    struct a64fx_task_mapping *taskmap = NULL;
     struct a64fx_task_allocation *alloc = NULL;
     struct task_struct* current_task = get_current();
 
     spin_lock(&dev->dev_lock);
-    for (i = 0; i < dev->num_tasks; i++)
+    taskmap = get_taskmap(dev, current_task);
+    if (taskmap)
     {
-        task = &dev->tasks[i];
-        if (task->task == current_task)
+        alloc = get_allocation(dev, taskmap, cmg_id, bb_id);
+        if (alloc)
         {
-            
-/*            dev->tasks[i].task = dev->tasks[dev->num_tasks-1].task;*/
-/*            dev->tasks[i].cpumask = dev->tasks[dev->num_tasks-1].cpumask;*/
-/*            dev->tasks[i].bb = dev->tasks[dev->num_tasks-1].bb;*/
-/*            dev->tasks[i].cmg_mask = dev->tasks[dev->num_tasks-1].cmg_mask;*/
-            for (j = 0; j < task->num_allocations; j++)
-            {
-                alloc = &task->allocations[j];
-                if (alloc->cmg == cmg_id && alloc->bb == bb_id)
-                {
-                    cmg = &dev->cmgs[cmg_id];
-                    spin_lock(&cmg->cmg_lock);
-                    cmg->bb_active &= (~(1<<bb_id));
-                    cpumask_copy(&alloc->cpumask, &task->allocations[task->num_allocations-1].cpumask);
-                    alloc->bb = task->allocations[task->num_allocations-1].bb;
-                    alloc->cmg = task->allocations[task->num_allocations-1].cmg;
-                    pr_info("Fujitsu HWB: Free BB %d at CMG%d\n", bb_id, cmg_id);
-                    task->num_allocations--;
-                    spin_unlock(&cmg->cmg_lock);
-                    break;
-                }
-            }
-            if (task->num_allocations == 0)
-            {
-                dev->tasks[i].task = dev->tasks[dev->num_tasks-1].task;
-                dev->tasks[i].num_allocations = dev->tasks[dev->num_tasks-1].num_allocations;
-                memcpy(dev->tasks[i].allocations, dev->tasks[dev->num_tasks-1].allocations, dev->tasks[i].num_allocations*sizeof(struct a64fx_task_allocation));
-                dev->num_tasks--;
-            }
-/*            spin_lock(&dev->cmgs[cmg_id].cmg_lock);*/
-/*            dev->cmgs[cmg_id].bb_active &= (~(1<<bb_id));*/
-/*            dev->tasks[i].cmg_mask &= (~(1<<cmg_id));*/
-/*            spin_unlock(&dev->cmgs[cmg_id].cmg_lock);*/
-/*            pr_info("Fujitsu HWB: Free BB %d at CMG%d\n", bb_id, cmg_id);*/
-/*            dev->num_tasks--;*/
-            break;
+            free_allocation(dev, taskmap, alloc);
+        }
+        if (taskmap->num_allocs == 0)
+        {
+            unregister_task(dev, taskmap);
         }
     }
     spin_unlock(&dev->dev_lock);
@@ -276,30 +438,71 @@ int oss_a64fx_hwb_free_ioctl(struct a64fx_hwb_device *dev, unsigned long arg)
     return 0;
 }
 
-int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int window)
+int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int window, int* outwindow)
 {
     int err = 0;
     u8 cmg = 0, ppe = 0;
-    
     struct task_struct* current_task = get_current();
+    struct a64fx_task_mapping* taskmap = NULL;
+    struct a64fx_task_allocation* alloc = NULL;
     
     // acquire lock
+    spin_lock(&dev->dev_lock);
+    pr_info("Fujitsu HWB: Get task mapping\n");
+    taskmap = get_taskmap(dev, current_task);
+    if (!taskmap)
+    {
+        // Try parent task. This happens in case of OpenMP and others.
+        pr_info("Fujitsu HWB: Get parent task mapping\n");
+        taskmap = get_taskmap(dev, current_task->real_parent);
+        if (!taskmap)
+        {
+            err = -ENODEV;
+            goto assign_blade_out;
+        }
+    }
     
     err = _oss_a64fx_hwb_get_peinfo(&cmg, &ppe);
     if (!err)
     {
         int cmg_id = (int)cmg;
-        struct a64fx_cmg_device* cmgdev = &dev->cmgs[cmg_id];
-        spin_lock(&cmgdev->cmg_lock);
-        cmgdev->bb_map[blade] |= (1<<window);
-        spin_unlock(&cmgdev->cmg_lock);
+        pr_info("Fujitsu HWB: Get allocation for CMG %d and Blade %d\n", cmg_id, blade);
+        alloc = get_allocation(dev, taskmap, cmg_id, blade);
+        if (alloc)
+        {
+            struct a64fx_cmg_device* cmgdev = &dev->cmgs[cmg_id];
+            spin_lock(&cmgdev->cmg_lock);
+            if (window >= 0 && window < MAX_BW_PER_CMG && test_bit(window, &cmgdev->bb_map[blade]) == 0)
+            {
+                //cmgdev->bb_map[blade] |= (1<<window);
+                pr_info("Fujitsu HWB: Use given window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
+                *outwindow = window;
+                set_bit(window, &cmgdev->bb_map[blade]);
+                set_bit(window, &alloc->win_mask);
+                err = 0;
+            }
+            else
+            {
+                err = find_first_zero_bit(&cmgdev->bb_map[blade], MAX_BW_PER_CMG);
+                if (err >= 0 && err < MAX_BW_PER_CMG)
+                {
+                    //cmgdev->bb_map[blade] |= (1<<err);
+                    pr_info("Fujitsu HWB: Use free window %d for CMG %d and Blade %d\n", err, cmg_id, blade);
+                    *outwindow = err;
+                    set_bit(err, &cmgdev->bb_map[blade]);
+                    set_bit(err, &alloc->win_mask);
+                    err = 0;
+                }
+            }
+            spin_unlock(&cmgdev->cmg_lock);
+        }
     }
 
     
-    
+assign_blade_out:
     // release lock
-    
-    
+    spin_unlock(&dev->dev_lock);
+    pr_info("Fujitsu HWB: Assign returns %d\n", err);
     return err;
 }
 
@@ -308,6 +511,7 @@ int oss_a64fx_hwb_assign_blade_ioctl(struct a64fx_hwb_device *dev, unsigned long
     int err = 0;
     int bb_id = 0;
     int win_id = 0;
+    int win_out = 0;
     struct fujitsu_hwb_ioc_bw_ctl ioc_bw_ctl = {0};
     if (copy_from_user(&ioc_bw_ctl, (struct fujitsu_hwb_ioc_bw_ctl __user *)arg, sizeof(struct fujitsu_hwb_ioc_bw_ctl)))
     {
@@ -316,9 +520,10 @@ int oss_a64fx_hwb_assign_blade_ioctl(struct a64fx_hwb_device *dev, unsigned long
     }
     bb_id = (int)ioc_bw_ctl.bb;
     win_id = (int)ioc_bw_ctl.window;
-    err = oss_a64fx_hwb_assign_blade(dev, bb_id, win_id);
+    err = oss_a64fx_hwb_assign_blade(dev, bb_id, win_id, &win_out);
     if (!err)
     {
+        ioc_bw_ctl.window = (u8)win_out;
         if (copy_to_user((struct fujitsu_hwb_ioc_bw_ctl __user *)arg, &ioc_bw_ctl, sizeof(struct fujitsu_hwb_ioc_bw_ctl)))
         {
             pr_err("Fujitsu HWB: Error to copy back bb_ctl data\n");
@@ -329,22 +534,52 @@ int oss_a64fx_hwb_assign_blade_ioctl(struct a64fx_hwb_device *dev, unsigned long
     return err;
 }
 
-int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int bb, int window)
+int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int window)
 {
     int err = 0;
     u8 cmg = 0, ppe = 0;
-    struct fujitsu_hwb_ioc_bw_ctl ioc_bw_ctl = {0};
     struct task_struct* current_task = get_current();
+    struct a64fx_task_mapping* taskmap = NULL;
+    struct a64fx_task_allocation* alloc = NULL;
+
+    spin_lock(&dev->dev_lock);
+    pr_info("Fujitsu HWB: Get task mapping\n");
+    taskmap = get_taskmap(dev, current_task);
+    if (!taskmap)
+    {
+        // Try parent task. This happens in case of OpenMP and others.
+        pr_info("Fujitsu HWB: Get parent task mapping\n");
+        taskmap = get_taskmap(dev, current_task->real_parent);
+        if (!taskmap)
+        {
+            err = -ENODEV;
+            goto unassign_blade_out;
+        }
+    }
 
     err = _oss_a64fx_hwb_get_peinfo(&cmg, &ppe);
     if (!err)
     {
-        struct a64fx_cmg_device* cmgdev = &dev->cmgs[(int)cmg];
-        spin_lock(&cmgdev->cmg_lock);
-        cmgdev->bb_map[bb] &= ~(1<<window);
-        spin_unlock(&cmgdev->cmg_lock);
+        int cmg_id = (int)cmg;
+        pr_info("Fujitsu HWB: Get allocation for CMG %d and Blade %d\n", cmg_id, blade);
+        alloc = get_allocation(dev, taskmap, cmg_id, blade);
+        if (alloc)
+        {
+            struct a64fx_cmg_device* cmgdev = &dev->cmgs[cmg_id];
+            spin_lock(&cmgdev->cmg_lock);
+            if (test_bit(window, &cmgdev->bb_map[blade]))
+            {
+                pr_info("Fujitsu HWB: Free window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
+                clear_bit(window, &cmgdev->bb_map[blade]);
+                clear_bit(window, &alloc->win_mask);
+            }
+            spin_unlock(&cmgdev->cmg_lock);
+        }
     }
 
+unassign_blade_out:
+    spin_unlock(&dev->dev_lock);
+    pr_info("Fujitsu HWB: Unassign returns %d\n", err);
     return err;
 }
 

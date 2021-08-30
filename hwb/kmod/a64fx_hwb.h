@@ -39,10 +39,10 @@ struct a64fx_barrier_blade {
 struct a64fx_cmg_device {
     int cmg_id;
     int num_pes;
-    u32 bb_active;
+    unsigned long bb_active;
     struct kobject kobj;
     struct a64fx_core_mapping pe_map[MAX_PE_PER_CMG];
-    u8 bb_map[MAX_BB_PER_CMG];
+    long unsigned int bb_map[MAX_BB_PER_CMG];
     struct a64fx_bw_mapping bw_map[MAX_BW_PER_CMG];
     spinlock_t cmg_lock;
 };
@@ -50,13 +50,19 @@ struct a64fx_cmg_device {
 struct a64fx_task_allocation {
     u8 bb;
     u8 cmg;
-    struct cpumask cpumask;
+    long unsigned int win_mask;
+    struct task_struct* task;
+    struct list_head list;
 };
 
 struct a64fx_task_mapping {
     struct task_struct* task;
-    struct a64fx_task_allocation allocations[MAX_NUM_CMG*MAX_BB_PER_CMG];
-    int num_allocations;
+    refcount_t refcount;
+    struct cpumask cpumask;
+    struct list_head list;
+    struct list_head allocs;
+    //struct a64fx_task_allocation allocations[MAX_NUM_CMG*MAX_BB_PER_CMG];
+    int num_allocs;
 };
 
 struct a64fx_hwb_device {
@@ -69,6 +75,7 @@ struct a64fx_hwb_device {
     spinlock_t dev_lock;
     refcount_t refcount;
     int num_tasks;
+    struct list_head task_list;
     struct a64fx_task_mapping tasks[MAX_NUM_CMG*MAX_BB_PER_CMG];
 };
 

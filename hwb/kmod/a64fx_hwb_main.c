@@ -5,6 +5,8 @@
 #include <linux/init.h>
 #include <include/linux/smp.h>
 #include <include/linux/cpumask.h>
+#include <linux/slab.h>
+#include <linux/list.h>
 
 #include "a64fx_hwb.h"
 #include "a64fx_hwb_cmg.h"
@@ -39,10 +41,10 @@ static ssize_t hwinfo_show(struct device *device, struct device_attribute *attr,
 
 DEVICE_ATTR_RO(hwinfo);
 
-struct attribute *oss_a64fx_sysfs_base_attrs[] = {
-    &dev_attr_hwinfo.attr,
-    NULL,
-};
+/*struct attribute *oss_a64fx_sysfs_base_attrs[] = {*/
+/*    &dev_attr_hwinfo.attr,*/
+/*    NULL,*/
+/*};*/
 
 
 /*
@@ -55,39 +57,21 @@ static struct a64fx_hwb_device oss_a64fx_hwb_device = {
         .fops = &oss_a64fx_hwb_fops,
         .mode = 0666,
     },
+    .task_list = LIST_HEAD_INIT(oss_a64fx_hwb_device.task_list),
+    .num_tasks = 0,
     .num_cmgs = 0,
 };
 
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
-/*	unsigned int cpu = iminor(file_inode(file));*/
-    pr_info("Fujitsu HWB: Open device\n");
-    refcount_inc(&oss_a64fx_hwb_device.refcount);
-	return 0;
+    pr_info("Fujitsu HWB: Opening device\n");
+    return 0;
 }
 
 static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
 {
-    int i = 0;
-    int j = 0;
-    struct task_struct* current_task = get_current();
-    for (i = 0; i < oss_a64fx_hwb_device.num_tasks; i++)
-    {
-        if (current_task == oss_a64fx_hwb_device.tasks[i].task)
-        {
-            pr_info("Fujitsu HWB: Free all allocations\n");
-            for (j = 0; j < oss_a64fx_hwb_device.tasks[i].num_allocations; j++)
-            {
-                struct a64fx_task_allocation* alloc = &oss_a64fx_hwb_device.tasks[i].allocations[j];
-                oss_a64fx_hwb_free(&oss_a64fx_hwb_device, alloc->cmg, alloc->bb);
-            }
-            oss_a64fx_hwb_device.tasks[i].num_allocations = 0;
-        }
-    }
-    refcount_dec(&oss_a64fx_hwb_device.refcount);
     pr_info("Fujitsu HWB: Closing device\n");
-
-	return 0;
+    return 0;
 }
 
 static long oss_a64fx_hwb_ioctl(struct file *file, unsigned int ioc, unsigned long arg)
@@ -128,6 +112,7 @@ void fill_pe_map(void *info)
     int cmg = 0;
     int ppe = 0;
     struct a64fx_hwb_device* dev = (struct a64fx_hwb_device*)info;
+    // preemption disabled, safe to use smp_processor_id()
     int cpuid = smp_processor_id();
     oss_a64fx_hwb_get_peinfo(&cmg, &ppe);
     dev->cmgs[cmg].pe_map[ppe].cpu_id = cpuid;
@@ -230,8 +215,8 @@ static void __exit oss_a64fx_hwb_exit(void)
     {
         destroy_cmg(&oss_a64fx_hwb_device.cmgs[i]);
     }
-    // Remove global sysfs attribute 'hwinfo'
     dev = oss_a64fx_hwb_device.misc.this_device;
+    // Remove global sysfs attribute 'hwinfo'
     device_remove_file(dev, &dev_attr_hwinfo);
     // Remove misc device fujitsu_hwb
     misc_deregister(&oss_a64fx_hwb_device.misc);
