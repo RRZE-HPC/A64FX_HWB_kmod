@@ -147,7 +147,7 @@ static struct a64fx_task_mapping * get_taskmap(struct a64fx_hwb_device *dev, str
     list_for_each(cur, &dev->task_list)
     {
         taskmap = list_entry(cur, struct a64fx_task_mapping, list);
-        if (taskmap->task == task)
+        if (taskmap->task->tgid == task->tgid)
         {
             return taskmap;
         }
@@ -245,7 +245,7 @@ static int valid_task(struct a64fx_hwb_device *dev)
     list_for_each(cur, &dev->task_list)
     {
         taskmap = list_entry(cur, struct a64fx_task_mapping, list);
-        if (taskmap->task == current_task || taskmap->task == current_task->real_parent)
+        if (taskmap->task->tgid == current_task->tgid)
         {
             return 1;
         }
