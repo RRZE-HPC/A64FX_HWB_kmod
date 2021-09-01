@@ -104,7 +104,7 @@ static struct a64fx_task_allocation * new_allocation(struct a64fx_hwb_device *de
     {
         return NULL;
     }
-    pr_info("New allocation\n");
+    pr_info("New allocation for CMG %d and Blade %d\n", cmg, bb);
     alloc->cmg = (u8)cmg;
     alloc->bb = (u8)bb;
     alloc->win_mask = 0x0;
@@ -143,7 +143,7 @@ static struct a64fx_task_mapping * get_taskmap(struct a64fx_hwb_device *dev, str
 {
     struct list_head* cur = NULL;
     struct a64fx_task_mapping *taskmap = NULL;
-    pr_info("Get task %d\n", task->pid);
+    pr_info("Get task %d (TGID %d)\n", task->pid, task->tgid);
     list_for_each(cur, &dev->task_list)
     {
         taskmap = list_entry(cur, struct a64fx_task_mapping, list);
@@ -197,43 +197,26 @@ static struct a64fx_task_mapping * register_task(struct a64fx_hwb_device *dev, s
 
 static int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap)
 {
-/*    struct list_head *cur = NULL, *tmp = NULL;*/
-/*    struct list_head *acur = NULL, *atmp = NULL;*/
-/*    struct a64fx_task_mapping *taskmap = NULL;*/
-/*    struct a64fx_task_allocation *alloc = NULL;*/
-/*    struct task_struct* current_task = get_current();*/
-/*    spin_lock(&dev->dev_lock);*/
-/*    taskmap = get_taskmap(dev, current_task);*/
+    int i = 0;
+    struct list_head *cur = NULL, *tmp = NULL;
+    struct a64fx_task_allocation *alloc = NULL;
     if (taskmap)
     {
+        if (taskmap->num_allocs > 0)
+        {
+            list_for_each_safe(cur, tmp, &taskmap->allocs)
+            {
+                alloc = list_entry(cur, struct a64fx_task_allocation, list);
+                free_allocation(dev, taskmap, alloc);
+                list_del(&alloc->list);
+                kfree(alloc);
+                taskmap->num_allocs--;
+            }
+        }
         list_del(&taskmap->list);
         kfree(taskmap);
         dev->num_tasks--;
     }
-/*    list_for_each_safe(cur, tmp, &dev->task_list)*/
-/*    {*/
-/*        taskmap = list_entry(cur, struct a64fx_task_mapping, list);*/
-/*        if (taskmap->task == current_task)*/
-/*        {*/
-/*            pr_info("Task known, dec refcount\n");*/
-/*            if (refcount_dec_and_test(&taskmap->refcount))*/
-/*            {*/
-/*                // clean allocations*/
-/*                pr_info("Task known, refcount zero, delete task\n");*/
-/*                list_for_each_safe(acur, atmp, &taskmap->allocs)*/
-/*                {*/
-/*                    alloc = list_entry(acur, struct a64fx_task_allocation, list);*/
-/*                    free_allocation(dev, taskmap, alloc);*/
-/*                }*/
-/*                taskmap->num_allocs = 0;*/
-/*                list_del(&taskmap->list);*/
-/*                kfree(taskmap);*/
-/*                dev->num_tasks--;*/
-/*            }*/
-/*            break;*/
-/*        }*/
-/*    }*/
-/*    spin_unlock(&dev->dev_lock);*/
     return 0;
 }
 
@@ -366,12 +349,13 @@ int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, unsigned long arg)
     cmg_id = (int)ioc_bb_ctl.cmg;
     cmg = &dev->cmgs[cmg_id];
     err = find_first_zero_bit(&cmg->bb_active, 64);
-    pr_info("Bit %d is zero, use it\n", err);
+    pr_info("Fujitsu HWB: Bit %d is zero, use it\n", err);
     if (err >= 0 && err < dev->num_bb_per_cmg)
     {
         register_allocation(dev, taskmap, cmg_id, err);
         ioc_bb_ctl.bb = (u8)err;
         ioc_bb_ctl.cmg = (u8)cmg_id;
+        set_bit(err, &cmg->bb_active);
         err = 0;
     }
     else
@@ -472,29 +456,27 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
         {
             struct a64fx_cmg_device* cmgdev = &dev->cmgs[cmg_id];
             spin_lock(&cmgdev->cmg_lock);
-            if (window >= 0 && window < MAX_BW_PER_CMG && test_bit(window, &cmgdev->bb_map[blade]) == 0)
+            err = -ENODEV;
+            if (window < 0)
+            {
+                window = find_first_zero_bit(&cmgdev->bw_active, MAX_BW_PER_CMG);
+                pr_info("Fujitsu HWB: Get next free window %d", window);
+            }
+            if (window >= 0 && window < MAX_BW_PER_CMG && test_bit(window, &cmgdev->bw_active) == 0)
             {
                 //cmgdev->bb_map[blade] |= (1<<window);
-                pr_info("Fujitsu HWB: Use given window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
+                pr_info("Fujitsu HWB: Use window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
                 *outwindow = window;
-                set_bit(window, &cmgdev->bb_map[blade]);
+                set_bit(window, &cmgdev->bw_active);
+/*                assign_bit(window, &cmgdev->bw_active[blade], 1);*/
                 set_bit(window, &alloc->win_mask);
                 err = 0;
             }
-            else
-            {
-                err = find_first_zero_bit(&cmgdev->bb_map[blade], MAX_BW_PER_CMG);
-                if (err >= 0 && err < MAX_BW_PER_CMG)
-                {
-                    //cmgdev->bb_map[blade] |= (1<<err);
-                    pr_info("Fujitsu HWB: Use free window %d for CMG %d and Blade %d\n", err, cmg_id, blade);
-                    *outwindow = err;
-                    set_bit(err, &cmgdev->bb_map[blade]);
-                    set_bit(err, &alloc->win_mask);
-                    err = 0;
-                }
-            }
             spin_unlock(&cmgdev->cmg_lock);
+        }
+        else
+        {
+            err = -ENODEV;
         }
     }
 
@@ -567,10 +549,10 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
         {
             struct a64fx_cmg_device* cmgdev = &dev->cmgs[cmg_id];
             spin_lock(&cmgdev->cmg_lock);
-            if (test_bit(window, &cmgdev->bb_map[blade]))
+            if (test_bit(window, &cmgdev->bw_active))
             {
                 pr_info("Fujitsu HWB: Free window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
-                clear_bit(window, &cmgdev->bb_map[blade]);
+                clear_bit(window, &cmgdev->bw_active);
                 clear_bit(window, &alloc->win_mask);
             }
             spin_unlock(&cmgdev->cmg_lock);

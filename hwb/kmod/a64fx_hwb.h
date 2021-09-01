@@ -40,10 +40,12 @@ struct a64fx_cmg_device {
     int cmg_id;
     int num_pes;
     unsigned long bb_active;
+    unsigned long bw_active;
     struct kobject kobj;
     struct a64fx_core_mapping pe_map[MAX_PE_PER_CMG];
     long unsigned int bb_map[MAX_BB_PER_CMG];
-    struct a64fx_bw_mapping bw_map[MAX_BW_PER_CMG];
+    long unsigned int bw_map[MAX_BW_PER_CMG];
+/*    struct a64fx_bw_mapping bw_map[MAX_BW_PER_CMG];*/
     spinlock_t cmg_lock;
 };
 
