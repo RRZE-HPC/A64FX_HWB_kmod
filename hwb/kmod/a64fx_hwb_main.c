@@ -61,11 +61,13 @@ static struct a64fx_hwb_device oss_a64fx_hwb_device = {
     .task_list = LIST_HEAD_INIT(oss_a64fx_hwb_device.task_list),
     .num_tasks = 0,
     .num_cmgs = 0,
+    .refcount = REFCOUNT_INIT(0),
 };
 
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
     pr_info("Opening device\n");
+    refcount_inc(&oss_a64fx_hwb_device.refcount);
     return 0;
 }
 
@@ -75,13 +77,17 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
     struct task_struct* task = get_current();
     struct a64fx_task_mapping *taskmap = NULL;
     pr_info("Closing device\n");
-    taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
-    if (taskmap)
+    if (refcount_read(&oss_a64fx_hwb_device.refcount) > 0)
     {
-        err = unregister_task(&oss_a64fx_hwb_device, taskmap);
-        if (err)
+        refcount_dec(&oss_a64fx_hwb_device.refcount);
+        taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
+        if (taskmap)
         {
-            pr_info("Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
+            err = unregister_task(&oss_a64fx_hwb_device, taskmap);
+            if (err)
+            {
+                pr_info("Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
+            }
         }
     }
     return 0;
