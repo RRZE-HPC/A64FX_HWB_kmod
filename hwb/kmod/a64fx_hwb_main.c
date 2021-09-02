@@ -137,6 +137,7 @@ void fill_pe_map(void *info)
     dev->cmgs[cmg].pe_map[ppe].cpu_id = cpuid;
     dev->cmgs[cmg].pe_map[ppe].cmg_id = cmg;
     dev->cmgs[cmg].pe_map[ppe].ppe_id = ppe;
+    pr_info("CPU %d CMG %d PPE %d\n", cpuid, cmg, ppe);
     dev->cmgs[cmg].pe_map[ppe].bw_map = 0x0;
 }
 
@@ -156,6 +157,7 @@ static int get_max_pe_per_cmg(struct a64fx_hwb_device* dev)
                 tmpcount++;
             }
         }
+        pr_info("CMG %d has %d PEs\n", i, tmpcount);
         dev->cmgs[i].num_pes = tmpcount;
         if (tmpcount > maxcount)
         {
