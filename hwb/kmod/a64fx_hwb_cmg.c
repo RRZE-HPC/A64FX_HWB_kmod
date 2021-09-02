@@ -101,6 +101,25 @@ static struct kobj_attribute init_sync_bb5_attr = __ATTR(init_sync_bb5, 0400, in
 struct kobj_type* kobjtype = NULL;
 
 
+static struct attribute *cmg_attrs[] = {
+    &core_map_attr.attr,
+    &used_bb_map_attr.attr,
+    &used_bw_map_attr.attr,
+    &init_sync_bb0_attr.attr,
+    &init_sync_bb1_attr.attr,
+    &init_sync_bb2_attr.attr,
+    &init_sync_bb3_attr.attr,
+    &init_sync_bb4_attr.attr,
+    &init_sync_bb5_attr.attr,
+    NULL,
+};
+
+static struct attribute_group cmg_group_attrs = {
+    .name = NULL,
+    .attrs = cmg_attrs,
+};
+
+
 
 int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* parent)
 {
@@ -130,49 +149,9 @@ int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* par
         return ret;
     }
     kobject_get(&dev->kobj);
-    ret = sysfs_create_file(&dev->kobj, &core_map_attr.attr);
-    if(ret){
-        pr_err("Cannot create core_map for CMG%d\n", cmg_id);
-        return ret;
-    }
-    ret = sysfs_create_file(&dev->kobj, &used_bb_map_attr.attr);
-    if(ret){
-        pr_err("Cannot create used_bb_map for CMG%d\n", cmg_id);
-        return ret;
-    }
-    ret = sysfs_create_file(&dev->kobj, &used_bw_map_attr.attr);
-    if(ret){
-        pr_err("Cannot create used_bw_map for CMG%d\n", cmg_id);
-        return ret;
-    }
-    ret = sysfs_create_file(&dev->kobj, &init_sync_bb0_attr.attr);
-    if(ret){
-        pr_err("Cannot create init_sync_bb0 for CMG%d\n", cmg_id);
-        return ret;
-    }
-    ret = sysfs_create_file(&dev->kobj, &init_sync_bb1_attr.attr);
-    if(ret){
-        pr_err("Cannot create init_sync_bb1 for CMG%d\n", cmg_id);
-        return ret;
-    }
-    ret = sysfs_create_file(&dev->kobj, &init_sync_bb2_attr.attr);
-    if(ret){
-        pr_err("Cannot create init_sync_bb2 for CMG%d\n", cmg_id);
-        return ret;
-    }
-    ret = sysfs_create_file(&dev->kobj, &init_sync_bb3_attr.attr);
-    if(ret){
-        pr_err("Cannot create init_sync_bb3 for CMG%d\n", cmg_id);
-        return ret;
-    }
-    ret = sysfs_create_file(&dev->kobj, &init_sync_bb4_attr.attr);
-    if(ret){
-        pr_err("Cannot create init_sync_bb4 for CMG%d\n", cmg_id);
-        return ret;
-    }
-    ret = sysfs_create_file(&dev->kobj, &init_sync_bb5_attr.attr);
-    if(ret){
-        pr_err("Cannot create init_sync_bb5 for CMG%d\n", cmg_id);
+    ret = sysfs_create_group(&dev->kobj, &cmg_group_attrs);
+    if (ret) {
+        pr_err("Cannot create sysfs files for CMG%d\n", cmg_id);
         return ret;
     }
     return 0;
@@ -180,14 +159,6 @@ int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* par
 
 void destroy_cmg(struct a64fx_cmg_device* dev)
 {
-    sysfs_remove_file(&dev->kobj, &init_sync_bb5_attr.attr);
-    sysfs_remove_file(&dev->kobj, &init_sync_bb4_attr.attr);
-    sysfs_remove_file(&dev->kobj, &init_sync_bb3_attr.attr);
-    sysfs_remove_file(&dev->kobj, &init_sync_bb2_attr.attr);
-    sysfs_remove_file(&dev->kobj, &init_sync_bb1_attr.attr);
-    sysfs_remove_file(&dev->kobj, &init_sync_bb0_attr.attr);
-    sysfs_remove_file(&dev->kobj, &used_bw_map_attr.attr);
-    sysfs_remove_file(&dev->kobj, &used_bb_map_attr.attr);
-    sysfs_remove_file(&dev->kobj, &core_map_attr.attr);
+    sysfs_remove_group(&dev->kobj, &cmg_group_attrs);
     kobject_put(&dev->kobj);
 }
