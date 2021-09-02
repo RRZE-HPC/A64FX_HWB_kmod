@@ -71,8 +71,8 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
     refcount_inc(&oss_a64fx_hwb_device.refcount);
 #ifdef __ARM_ARCH_8A
     asm ("MRS %0, S3_0_C11_C12_0" ::"r"(val));
-    set_bit(IMP_BARRIER_CTRL_EL1_EL0AE_BIT, &val);
-    set_bit(IMP_BARRIER_CTRL_EL1_EL1AE_BIT, &val);
+    val |= (1ULL<<IMP_BARRIER_CTRL_EL1_EL0AE_BIT);
+    val |= (1ULL<<IMP_BARRIER_CTRL_EL1_EL1AE_BIT);
     asm ("MSR S3_0_C11_C12_0,%0" :"=r"(val));
 #endif
     return 0;
@@ -81,6 +81,7 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
 {
     int err = 0;
+    u64 val = 0;
     struct task_struct* task = get_current();
     struct a64fx_task_mapping *taskmap = NULL;
     pr_info("Closing device\n");
@@ -100,8 +101,8 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
         if (refcount_read(&oss_a64fx_hwb_device.refcount) == 0)
         {
             asm ("MRS %0, S3_0_C11_C12_0" ::"r"(val));
-            clear_bit(IMP_BARRIER_CTRL_EL1_EL0AE_BIT, &val);
-            clear_bit(IMP_BARRIER_CTRL_EL1_EL1AE_BIT, &val);
+            val &= ~(1ULL<<IMP_BARRIER_CTRL_EL1_EL0AE_BIT);
+            val &= ~(1ULL<<IMP_BARRIER_CTRL_EL1_EL1AE_BIT);
             asm ("MSR S3_0_C11_C12_0,%0" :"=r"(val));
         }
 #endif
