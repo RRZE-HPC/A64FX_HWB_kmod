@@ -1,4 +1,4 @@
 EXTRA_CFLAGS = -Wall -g -I.
 
 obj-m        = a64fx_hwb.o
-a64fx_hwb-objs = a64fx_hwb_main.o a64fx_hwb_cmg.o a64fx_hwb_ioctl.o
+a64fx_hwb-objs = a64fx_hwb_main.o a64fx_hwb_cmg.o a64fx_hwb_arch_funcs.o a64fx_hwb_ioctl.o
