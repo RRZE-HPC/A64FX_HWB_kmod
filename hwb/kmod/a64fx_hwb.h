@@ -10,6 +10,9 @@
 #define MAX_BB_PER_CMG 6
 #define MAX_BW_PER_CMG 4
 
+#define IMP_BARRIER_CTRL_EL1_EL0AE_BIT 62
+#define IMP_BARRIER_CTRL_EL1_EL1AE_BIT 63
+
 struct a64fx_core_mapping {
     int cpu_id;
     int cmg_id;

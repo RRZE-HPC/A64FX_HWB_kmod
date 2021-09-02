@@ -66,8 +66,15 @@ static struct a64fx_hwb_device oss_a64fx_hwb_device = {
 
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
+    u64 val = 0;
     pr_info("Opening device\n");
     refcount_inc(&oss_a64fx_hwb_device.refcount);
+#ifdef __ARM_ARCH_8A
+    asm ("MRS %0, S3_0_C11_C12_0" ::"r"(val));
+    set_bit(IMP_BARRIER_CTRL_EL1_EL0AE_BIT, &val);
+    set_bit(IMP_BARRIER_CTRL_EL1_EL1AE_BIT, &val);
+    asm ("MSR S3_0_C11_C12_0,%0" :"=r"(val));
+#endif
     return 0;
 }
 
@@ -89,6 +96,15 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
                 pr_info("Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
             }
         }
+#ifdef __ARM_ARCH_8A
+        if (refcount_read(&oss_a64fx_hwb_device.refcount) == 0)
+        {
+            asm ("MRS %0, S3_0_C11_C12_0" ::"r"(val));
+            clear_bit(IMP_BARRIER_CTRL_EL1_EL0AE_BIT, &val);
+            clear_bit(IMP_BARRIER_CTRL_EL1_EL1AE_BIT, &val);
+            asm ("MSR S3_0_C11_C12_0,%0" :"=r"(val));
+        }
+#endif
     }
     return 0;
 }
