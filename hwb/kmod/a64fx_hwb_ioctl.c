@@ -42,6 +42,7 @@ static int check_cpumask(struct a64fx_hwb_device *dev, struct cpumask cpumask)
     int cmg = -1;
     for_each_cpu(cpu, &cpumask)
     {
+        if (!cpu_online(cpu)) return -1;
         for (i = 0; i < dev->num_cmgs; i++)
         {
             for (j = 0; j < dev->cmgs[i].num_pes; j++)
@@ -63,18 +64,6 @@ static int check_cpumask(struct a64fx_hwb_device *dev, struct cpumask cpumask)
     return 0;
 }
 
-static int cpumask_online(struct cpumask cpumask)
-{
-    int cpu = -1;
-    for_each_cpu(cpu, &cpumask)
-    {
-        if (!cpu_online(cpu))
-        {
-            return -1;
-        }
-    }
-    return 0;
-}
 
 static struct a64fx_task_allocation * get_allocation(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap, int cmg, int bb)
 {
@@ -208,21 +197,6 @@ int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *tas
     return 0;
 }
 
-/*static int valid_task(struct a64fx_hwb_device *dev)*/
-/*{*/
-/*    struct list_head *cur = NULL;*/
-/*    struct a64fx_task_mapping* taskmap = NULL;*/
-/*    struct task_struct* current_task = get_current();*/
-/*    list_for_each(cur, &dev->task_list)*/
-/*    {*/
-/*        taskmap = list_entry(cur, struct a64fx_task_mapping, list);*/
-/*        if (taskmap->task->tgid == current_task->tgid)*/
-/*        {*/
-/*            return 1;*/
-/*        }*/
-/*    }*/
-/*    return 0;*/
-/*}*/
 
 #ifdef __x86_64__
 static int _oss_a64fx_hwb_get_peinfo(u8* cmg, u8 * ppe)
@@ -235,7 +209,8 @@ static int _oss_a64fx_hwb_get_peinfo(u8* cmg, u8 * ppe)
     pr_info("get_peinfo for CPU %d of %d with %d PE/CMG: CMG%u PPE %u\n", cpuid, num_cpus, pe_per_cmg, *cmg, *ppe);
     return 0;
 }
-#else
+#endif
+#ifdef __ARM_ARCH_8A
 static int _oss_a64fx_hwb_get_peinfo(u8* cmg, u8 * ppe)
 {
     u64 val = 0;
@@ -251,6 +226,7 @@ int oss_a64fx_hwb_get_peinfo(int *cmg, int *ppe)
     u8 ucmg;
     u8 uppe;
     _oss_a64fx_hwb_get_peinfo(&ucmg, &uppe);
+
     *cmg = (int)ucmg;
     *ppe = (int)uppe;
     return 0;
@@ -354,13 +330,7 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
     err = check_cpumask(dev, cpumask);
     if (err)
     {
-        pr_err("cpumask spans multiple CMGs! Not allowed\n");
-        return -EINVAL;
-    }
-    err = cpumask_online(cpumask);
-    if (err)
-    {
-        pr_err("cpumask contains offline cpus\n");
+        pr_err("cpumask spans multiple CMGs or contains offline CPUs\n");
         return -EINVAL;
     }
     cmg_id = (int)ioc_bb_ctl.cmg;
