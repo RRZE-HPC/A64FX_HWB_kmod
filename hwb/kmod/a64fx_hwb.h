@@ -2,6 +2,8 @@
 #define A64FX_HWB_H
 
 #include <linux/refcount.h>
+#include <linux/kobject.h>
+#include <linux/miscdevice.h>
 
 #define MAX_NUM_CMG    4
 #define MAX_PE_PER_CMG 13

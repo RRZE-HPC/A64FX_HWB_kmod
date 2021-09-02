@@ -1,10 +1,10 @@
 #include <include/linux/smp.h>
 #include <include/linux/cpumask.h>
 
-
+#include "a64fx_hwb.h"
 
 #ifdef __ARM_ARCH_8A
-#include "a64fx_hwb.h"
+
 
 u64 read_hwb_ctrl()
 {
