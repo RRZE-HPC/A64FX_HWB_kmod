@@ -218,6 +218,7 @@ static int _oss_a64fx_hwb_get_peinfo(u8* cmg, u8 * ppe)
     asm ("MRS %0, S3_0_C11_C12_4" :: "r"(val));
     *ppe = (u8)(val & 0xF);
     *cmg = (u8)((val >> 4) & 0x3);
+    pr_info("get_peinfo for CPU %d CMG%u PPE %u\n", smp_processor_id(), *cmg, *ppe);
     return 0;
 }
 #endif
