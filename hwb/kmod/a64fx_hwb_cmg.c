@@ -1,3 +1,4 @@
+#define pr_fmt(fmt) "%s:%s: " fmt, KBUILD_MODNAME, __func__
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -124,24 +125,21 @@ static struct attribute_group cmg_group_attrs = {
 int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* parent)
 {
     int ret = 0;
-    //char buf[20];
-    int i = 0;
-    int cpus_per_pe = num_online_cpus()/MAX_NUM_CMG;
     struct kobject* kobj = NULL;
     
-    pr_info("Fujitsu HWB: init CMG%d\n", cmg_id);
+    pr_info("init CMG%d\n", cmg_id);
     dev->bb_active = 0x0U;
     dev->cmg_id = cmg_id;
     spin_lock_init(&dev->cmg_lock);
 
     if (!kobjtype)
     {
-        pr_info("Fujitsu HWB: create TeST kobj\n");
+        pr_info("create Test kobj to get default kobjtype\n");
         kobj = kobject_create_and_add("TeST", parent);
         kobjtype = get_ktype(kobj);
         kobject_put(kobj);
     }
-    pr_info("Fujitsu HWB: create CMG kobj\n");
+    pr_info("create CMG kobj\n");
     kobject_init(&dev->kobj, kobjtype);
     ret = kobject_add(&dev->kobj, parent, "CMG%d", cmg_id);
     if(ret){
@@ -159,6 +157,10 @@ int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* par
 
 void destroy_cmg(struct a64fx_cmg_device* dev)
 {
-    sysfs_remove_group(&dev->kobj, &cmg_group_attrs);
-    kobject_put(&dev->kobj);
+    if (dev)
+    {
+        pr_info("destroy CMG%d\n", dev->cmg_id);
+        sysfs_remove_group(&dev->kobj, &cmg_group_attrs);
+        kobject_put(&dev->kobj);
+    }
 }

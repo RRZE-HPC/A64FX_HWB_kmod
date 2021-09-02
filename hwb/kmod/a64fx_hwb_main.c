@@ -1,3 +1,4 @@
+#define pr_fmt(fmt) "%s:%s: " fmt, KBUILD_MODNAME, __func__
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -64,22 +65,23 @@ static struct a64fx_hwb_device oss_a64fx_hwb_device = {
 
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
-    pr_info("Fujitsu HWB: Opening device\n");
+    pr_info("Opening device\n");
     return 0;
 }
 
 static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
 {
-    pr_info("Fujitsu HWB: Closing device\n");
     int err = 0;
     struct task_struct* task = get_current();
-    struct a64fx_task_mapping *taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
+    struct a64fx_task_mapping *taskmap = NULL;
+    pr_info("Closing device\n");
+    taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
     if (taskmap)
     {
         err = unregister_task(&oss_a64fx_hwb_device, taskmap);
         if (err)
         {
-            pr_info("Fujitsu HWB: Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
+            pr_info("Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
         }
     }
     return 0;
@@ -91,23 +93,23 @@ static long oss_a64fx_hwb_ioctl(struct file *file, unsigned int ioc, unsigned lo
     
     switch (ioc) {
         case FUJITSU_HWB_IOC_GET_PE_INFO:
-            pr_info("Fujitsu HWB: FUJITSU_HWB_IOC_GET_PE_INFO...\n");
+            pr_info("FUJITSU_HWB_IOC_GET_PE_INFO...\n");
             err = oss_a64fx_hwb_get_peinfo_ioctl(arg);
             break;
         case FUJITSU_HWB_IOC_BW_ASSIGN:
-            pr_info("Fujitsu HWB: FUJITSU_HWB_IOC_BW_ASSIGN...\n");
+            pr_info("FUJITSU_HWB_IOC_BW_ASSIGN...\n");
             err = oss_a64fx_hwb_assign_blade_ioctl(&oss_a64fx_hwb_device, arg);
             break;
         case FUJITSU_HWB_IOC_BW_UNASSIGN:
-            pr_info("Fujitsu HWB: FUJITSU_HWB_IOC_BW_UNASSIGN...\n");
+            pr_info("FUJITSU_HWB_IOC_BW_UNASSIGN...\n");
             err = oss_a64fx_hwb_unassign_blade_ioctl(&oss_a64fx_hwb_device, arg);
             break;
         case FUJITSU_HWB_IOC_BB_ALLOC:
-            pr_info("Fujitsu HWB: FUJITSU_HWB_IOC_BB_ALLOC...\n");
+            pr_info("FUJITSU_HWB_IOC_BB_ALLOC...\n");
             err = oss_a64fx_hwb_allocate(&oss_a64fx_hwb_device, arg);
             break;
         case FUJITSU_HWB_IOC_BB_FREE:
-            pr_info("Fujitsu HWB: FUJITSU_HWB_IOC_BB_FREE...\n");
+            pr_info("FUJITSU_HWB_IOC_BB_FREE...\n");
             err = oss_a64fx_hwb_free_ioctl(&oss_a64fx_hwb_device, arg);
             break;
         default:
@@ -148,7 +150,6 @@ static int get_max_pe_per_cmg(struct a64fx_hwb_device* dev)
                 tmpcount++;
             }
         }
-        pr_info("CMG%d count %d\n", i, tmpcount);
         dev->cmgs[i].num_pes = tmpcount;
         if (tmpcount > maxcount)
         {
@@ -164,12 +165,12 @@ static int __init oss_a64fx_hwb_init(void)
     int i = 0;
     int j = 0;
     struct device *dev = NULL;
-    pr_info("Fujitsu HWB: initializing...\n");
+    pr_info("initializing...\n");
 
     // Create misc device fujitsu_hwb
     err = misc_register(&oss_a64fx_hwb_device.misc);
     if (err) {
-        pr_err("Fujitsu HWB: misc_register failed\n");
+        pr_err("misc_register failed\n");
         return err;
     }
     dev = oss_a64fx_hwb_device.misc.this_device;
@@ -178,7 +179,7 @@ static int __init oss_a64fx_hwb_init(void)
     // Create global sysfs attribute 'hwinfo'
     err = device_create_file(dev, &dev_attr_hwinfo);
     if (err) {
-        pr_err("Fujitsu HWB: creation of hwinfo sysfs file failed\n");
+        pr_err("creation of hwinfo sysfs file failed\n");
         goto unreg_miscdev;
     }
 
@@ -206,7 +207,7 @@ static int __init oss_a64fx_hwb_init(void)
         }
     }
 
-    pr_info("Fujitsu HWB: init done\n");
+    pr_info("init done\n");
     return err;
 remove_global_sysfs:
     device_remove_file(dev, &dev_attr_hwinfo);
@@ -219,7 +220,7 @@ static void __exit oss_a64fx_hwb_exit(void)
 {
     int i = 0;
     struct device *dev = NULL;
-    pr_info("Fujitsu HWB: exiting...\n");
+    pr_info("exiting...\n");
     // Iterate over CMGs and destroy data structures and CMG
     // related sysfs files
     for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
@@ -231,7 +232,7 @@ static void __exit oss_a64fx_hwb_exit(void)
     device_remove_file(dev, &dev_attr_hwinfo);
     // Remove misc device fujitsu_hwb
     misc_deregister(&oss_a64fx_hwb_device.misc);
-    pr_info("Fujitsu HWB: exit done\n");
+    pr_info("exit done\n");
 }
 
 MODULE_DESCRIPTION("Module for A64fx hardware barrier");

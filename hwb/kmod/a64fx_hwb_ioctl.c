@@ -1,3 +1,4 @@
+#define pr_fmt(fmt) "%s:%s: " fmt, KBUILD_MODNAME, __func__
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -182,22 +183,9 @@ static struct a64fx_task_mapping * new_taskmap(struct a64fx_hwb_device *dev, str
 
 }
 
-static struct a64fx_task_mapping * register_task(struct a64fx_hwb_device *dev, struct task_struct* task, struct cpumask cpumask)
-{
-    struct a64fx_task_mapping *taskmap = NULL;
-/*    struct task_struct* current_task = get_current();*/
-    taskmap = get_taskmap(dev, task);
-    if (!taskmap)
-    {
-        taskmap = new_taskmap(dev, task, cpumask);
-    }
-    //refcount_inc(&taskmap->refcount);
-    return taskmap;
-}
 
 int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap)
 {
-    int i = 0;
     struct list_head *cur = NULL, *tmp = NULL;
     struct a64fx_task_allocation *alloc = NULL;
     if (taskmap)
@@ -220,21 +208,21 @@ int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *tas
     return 0;
 }
 
-static int valid_task(struct a64fx_hwb_device *dev)
-{
-    struct list_head *cur = NULL;
-    struct a64fx_task_mapping* taskmap = NULL;
-    struct task_struct* current_task = get_current();
-    list_for_each(cur, &dev->task_list)
-    {
-        taskmap = list_entry(cur, struct a64fx_task_mapping, list);
-        if (taskmap->task->tgid == current_task->tgid)
-        {
-            return 1;
-        }
-    }
-    return 0;
-}
+/*static int valid_task(struct a64fx_hwb_device *dev)*/
+/*{*/
+/*    struct list_head *cur = NULL;*/
+/*    struct a64fx_task_mapping* taskmap = NULL;*/
+/*    struct task_struct* current_task = get_current();*/
+/*    list_for_each(cur, &dev->task_list)*/
+/*    {*/
+/*        taskmap = list_entry(cur, struct a64fx_task_mapping, list);*/
+/*        if (taskmap->task->tgid == current_task->tgid)*/
+/*        {*/
+/*            return 1;*/
+/*        }*/
+/*    }*/
+/*    return 0;*/
+/*}*/
 
 #ifdef __x86_64__
 static int _oss_a64fx_hwb_get_peinfo(u8* cmg, u8 * ppe)
@@ -244,7 +232,7 @@ static int _oss_a64fx_hwb_get_peinfo(u8* cmg, u8 * ppe)
     int pe_per_cmg = (num_cpus/MAX_NUM_CMG);
     *cmg = (u8)(cpuid / pe_per_cmg);
     *ppe = (u8)(cpuid % pe_per_cmg);
-    pr_info("Fujitsu HWB: get_peinfo for CPU %d of %d with %d PE/CMG: CMG%u PPE %u\n", cpuid, num_cpus, pe_per_cmg, *cmg, *ppe);
+    pr_info("get_peinfo for CPU %d of %d with %d PE/CMG: CMG%u PPE %u\n", cpuid, num_cpus, pe_per_cmg, *cmg, *ppe);
     return 0;
 }
 #else
@@ -271,10 +259,10 @@ int oss_a64fx_hwb_get_peinfo(int *cmg, int *ppe)
 int oss_a64fx_hwb_get_peinfo_ioctl(unsigned long arg)
 {
     struct fujitsu_hwb_ioc_pe_info ustruct = {0};
-    pr_info("Fujitsu HWB: FUJITSU_HWB_IOC_GET_PE_INFO...\n");
+    pr_info("FUJITSU_HWB_IOC_GET_PE_INFO...\n");
     if (copy_from_user(&ustruct, (struct fujitsu_hwb_ioc_pe_info __user *)arg, sizeof(struct fujitsu_hwb_ioc_pe_info)))
     {
-        pr_err("Fujitsu HWB: Error to get pe_info data\n");
+        pr_err("Error to get pe_info data\n");
         return -1;
     }
     ustruct.cmg = 0xFF;
@@ -282,96 +270,114 @@ int oss_a64fx_hwb_get_peinfo_ioctl(unsigned long arg)
     _oss_a64fx_hwb_get_peinfo(&ustruct.cmg, &ustruct.ppe);
     if (copy_to_user((struct fujitsu_hwb_ioc_pe_info __user *)arg, &ustruct, sizeof(struct fujitsu_hwb_ioc_pe_info)))
     {
-        pr_err("Fujitsu HWB: Error to copy back pe_info data\n");
+        pr_err("Error to copy back pe_info data\n");
         return -1;
     }
     return 0;
 }
 
-int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, unsigned long arg)
+int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, int cmg, struct cpumask cpumask, int *blade)
 {
     int err = 0;
-    int cmg_id = -1;
-    struct a64fx_cmg_device *cmg = NULL;
+    int bit = 0;
+    struct a64fx_cmg_device *cmgdev = NULL;
     struct a64fx_task_mapping *taskmap = NULL;
-/*    struct a64fx_task_allocation *alloc = NULL;*/
-    unsigned long mask;
-    struct cpumask cpumask;
-    struct fujitsu_hwb_ioc_bb_ctl ioc_bb_ctl = {0};
-    struct fujitsu_hwb_ioc_bb_ctl __user *uarg = (struct fujitsu_hwb_ioc_bb_ctl __user *)arg;
     struct task_struct* current_task = get_current();
-    
+    if (cmg < 0 || cmg > MAX_NUM_CMG || (!blade))
+    {
+        return -EINVAL;
+    }
+
     // acquire lock
-    pr_info("Fujitsu HWB: Start allocate\n");
-    if (copy_from_user(&ioc_bb_ctl, uarg, sizeof(struct fujitsu_hwb_ioc_bb_ctl __user)))
-    {
-        pr_err("Fujitsu HWB: Error to get bb_ctl data\n");
-        return -1;
-    }
-    pr_info("Fujitsu HWB: Start allocate (pemask)\n");
-    if (copy_from_user(&mask, (unsigned long __user *)ioc_bb_ctl.pemask, sizeof(unsigned long __user)))
-    {
-        pr_err("Fujitsu HWB: Error to get bb_ctl pemask data\n");
-        return -1;
-    }
-    pr_info("Fujitsu HWB: Read pemask\n");
     spin_lock(&dev->dev_lock);
-    err = pemask_to_cpumask(ioc_bb_ctl.size, &mask, &cpumask);
-    if (err == 0)
-    {
-        err = -EINVAL;
-        pr_err("Fujitsu HWB: cpumask empty\n");
-        goto allocate_exit;
-    }
-    err = check_cpumask(dev, cpumask);
-    if (err)
-    {
-        pr_err("Fujitsu HWB: cpumask spans multiple CMGs! Not allowed\n");
-        goto allocate_exit;
-    }
-    err = cpumask_online(cpumask);
-    if (err)
-    {
-        pr_err("Fujitsu HWB: cpumask contains offline cpus\n");
-        goto allocate_exit;
-    }
+
     taskmap = get_taskmap(dev, current_task);
     if (!taskmap)
     {
         taskmap = new_taskmap(dev, current_task, cpumask);
         if (!taskmap)
         {
-            pr_err("Fujitsu HWB: Failed to register task or get existing mapping\n");
+            pr_err("Failed to register task or get existing mapping\n");
             err = -1;
             goto allocate_exit;
         }
     }
-    cmg_id = (int)ioc_bb_ctl.cmg;
-    cmg = &dev->cmgs[cmg_id];
-    err = find_first_zero_bit(&cmg->bb_active, 64);
-    pr_info("Fujitsu HWB: Bit %d is zero, use it\n", err);
-    if (err >= 0 && err < dev->num_bb_per_cmg)
+    cmgdev = &dev->cmgs[cmg];
+    err = -ENODEV;
+    bit = find_first_zero_bit(&cmgdev->bb_active, 64);
+    pr_info("Bit %d is zero, use it\n", bit);
+    if (bit >= 0 && bit < dev->num_bb_per_cmg)
     {
-        register_allocation(dev, taskmap, cmg_id, err);
-        ioc_bb_ctl.bb = (u8)err;
-        ioc_bb_ctl.cmg = (u8)cmg_id;
-        set_bit(err, &cmg->bb_active);
+        register_allocation(dev, taskmap, cmg, bit);
+        *blade = bit;
+        set_bit(bit, &cmgdev->bb_active);
         err = 0;
-    }
-    else
-    {
-        err = -ENODEV;
     }
 
 allocate_exit:
     spin_unlock(&dev->dev_lock);
-    if (copy_to_user((struct fujitsu_hwb_ioc_bb_ctl __user *)arg, &ioc_bb_ctl, sizeof(struct fujitsu_hwb_ioc_bb_ctl __user)))
-    {
-        pr_err("Fujitsu HWB: Error to copy back bb_ctl data\n");
-        return -1;
-    }
 
     return err;
+}
+
+
+int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg)
+{
+    int err = 0;
+    int cmg_id = 0;
+    int bb_id = 0;
+    unsigned long mask = 0;
+    struct cpumask cpumask;
+    struct fujitsu_hwb_ioc_bb_ctl ioc_bb_ctl = {0};
+    struct fujitsu_hwb_ioc_bb_ctl __user *uarg = (struct fujitsu_hwb_ioc_bb_ctl __user *)arg;
+    
+    pr_info("Start allocate\n");
+    if (copy_from_user(&ioc_bb_ctl, uarg, sizeof(struct fujitsu_hwb_ioc_bb_ctl __user)))
+    {
+        pr_err("Error to get bb_ctl data\n");
+        return -EINVAL;
+    }
+    pr_info("Start allocate (pemask)\n");
+    if (copy_from_user(&mask, (unsigned long __user *)ioc_bb_ctl.pemask, sizeof(unsigned long __user)))
+    {
+        pr_err("Error to get bb_ctl pemask data\n");
+        return -EINVAL;
+    }
+    pr_info("Read pemask\n");
+    
+    err = pemask_to_cpumask(ioc_bb_ctl.size, &mask, &cpumask);
+    if (err == 0)
+    {
+        pr_err("cpumask empty\n");
+        return -EINVAL;
+    }
+    err = check_cpumask(dev, cpumask);
+    if (err)
+    {
+        pr_err("cpumask spans multiple CMGs! Not allowed\n");
+        return -EINVAL;
+    }
+    err = cpumask_online(cpumask);
+    if (err)
+    {
+        pr_err("cpumask contains offline cpus\n");
+        return -EINVAL;
+    }
+    cmg_id = (int)ioc_bb_ctl.cmg;
+    bb_id = (int)ioc_bb_ctl.bb;
+    err = oss_a64fx_hwb_allocate(dev, cmg_id, cpumask, &bb_id);
+    if (err)
+    {
+        return err;
+    }
+    ioc_bb_ctl.bb = (u8)bb_id;
+    
+    if (copy_to_user((struct fujitsu_hwb_ioc_bb_ctl __user *)arg, &ioc_bb_ctl, sizeof(struct fujitsu_hwb_ioc_bb_ctl __user)))
+    {
+        pr_err("Error to copy back bb_ctl data\n");
+        return -1;
+    }
+    return 0;
 }
 
 int oss_a64fx_hwb_free(struct a64fx_hwb_device *dev, int cmg_id, int bb_id)
@@ -408,7 +414,7 @@ int oss_a64fx_hwb_free_ioctl(struct a64fx_hwb_device *dev, unsigned long arg)
     struct fujitsu_hwb_ioc_bb_ctl ioc_bb_ctl = {0};
     if (copy_from_user(&ioc_bb_ctl, (struct fujitsu_hwb_ioc_bb_ctl __user *)arg, sizeof(struct fujitsu_hwb_ioc_bb_ctl)))
     {
-        pr_err("Fujitsu HWB: Error to get bb_ctl data\n");
+        pr_err("Error to get bb_ctl data\n");
         return -1;
     }
     cmg_id = (int)ioc_bb_ctl.cmg;
@@ -416,7 +422,7 @@ int oss_a64fx_hwb_free_ioctl(struct a64fx_hwb_device *dev, unsigned long arg)
     oss_a64fx_hwb_free(dev, cmg_id, bb_id);
     if (copy_to_user((struct fujitsu_hwb_ioc_bb_ctl __user *)arg, &ioc_bb_ctl, sizeof(struct fujitsu_hwb_ioc_bb_ctl)))
     {
-        pr_err("Fujitsu HWB: Error to copy back bb_ctl data\n");
+        pr_err("Error to copy back bb_ctl data\n");
         return -1;
     }
     return 0;
@@ -432,12 +438,12 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
     
     // acquire lock
     spin_lock(&dev->dev_lock);
-    pr_info("Fujitsu HWB: Get task mapping\n");
+    pr_info("Get task mapping\n");
     taskmap = get_taskmap(dev, current_task);
     if (!taskmap)
     {
         // Try parent task. This happens in case of OpenMP and others.
-        pr_info("Fujitsu HWB: Get parent task mapping\n");
+        pr_info("Get parent task mapping\n");
         taskmap = get_taskmap(dev, current_task->real_parent);
         if (!taskmap)
         {
@@ -450,7 +456,7 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
     if (!err)
     {
         int cmg_id = (int)cmg;
-        pr_info("Fujitsu HWB: Get allocation for CMG %d and Blade %d\n", cmg_id, blade);
+        pr_info("Get allocation for CMG %d and Blade %d\n", cmg_id, blade);
         alloc = get_allocation(dev, taskmap, cmg_id, blade);
         if (alloc)
         {
@@ -460,12 +466,12 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
             if (window < 0)
             {
                 window = find_first_zero_bit(&cmgdev->bw_active, MAX_BW_PER_CMG);
-                pr_info("Fujitsu HWB: Get next free window %d", window);
+                pr_info("Get next free window %d", window);
             }
             if (window >= 0 && window < MAX_BW_PER_CMG && test_bit(window, &cmgdev->bw_active) == 0)
             {
                 //cmgdev->bb_map[blade] |= (1<<window);
-                pr_info("Fujitsu HWB: Use window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
+                pr_info("Use window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
                 *outwindow = window;
                 set_bit(window, &cmgdev->bw_active);
 /*                assign_bit(window, &cmgdev->bw_active[blade], 1);*/
@@ -484,7 +490,7 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
 assign_blade_out:
     // release lock
     spin_unlock(&dev->dev_lock);
-    pr_info("Fujitsu HWB: Assign returns %d\n", err);
+    pr_info("Assign returns %d\n", err);
     return err;
 }
 
@@ -497,7 +503,7 @@ int oss_a64fx_hwb_assign_blade_ioctl(struct a64fx_hwb_device *dev, unsigned long
     struct fujitsu_hwb_ioc_bw_ctl ioc_bw_ctl = {0};
     if (copy_from_user(&ioc_bw_ctl, (struct fujitsu_hwb_ioc_bw_ctl __user *)arg, sizeof(struct fujitsu_hwb_ioc_bw_ctl)))
     {
-        pr_err("Fujitsu HWB: Error to get bb_ctl data\n");
+        pr_err("Error to get bb_ctl data\n");
         return -1;
     }
     bb_id = (int)ioc_bw_ctl.bb;
@@ -508,7 +514,7 @@ int oss_a64fx_hwb_assign_blade_ioctl(struct a64fx_hwb_device *dev, unsigned long
         ioc_bw_ctl.window = (u8)win_out;
         if (copy_to_user((struct fujitsu_hwb_ioc_bw_ctl __user *)arg, &ioc_bw_ctl, sizeof(struct fujitsu_hwb_ioc_bw_ctl)))
         {
-            pr_err("Fujitsu HWB: Error to copy back bb_ctl data\n");
+            pr_err("Error to copy back bb_ctl data\n");
             return -1;
         }
         return 0;
@@ -525,12 +531,12 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
     struct a64fx_task_allocation* alloc = NULL;
 
     spin_lock(&dev->dev_lock);
-    pr_info("Fujitsu HWB: Get task mapping\n");
+    pr_info("Get task mapping\n");
     taskmap = get_taskmap(dev, current_task);
     if (!taskmap)
     {
         // Try parent task. This happens in case of OpenMP and others.
-        pr_info("Fujitsu HWB: Get parent task mapping\n");
+        pr_info("Get parent task mapping\n");
         taskmap = get_taskmap(dev, current_task->real_parent);
         if (!taskmap)
         {
@@ -543,7 +549,7 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
     if (!err)
     {
         int cmg_id = (int)cmg;
-        pr_info("Fujitsu HWB: Get allocation for CMG %d and Blade %d\n", cmg_id, blade);
+        pr_info("Get allocation for CMG %d and Blade %d\n", cmg_id, blade);
         alloc = get_allocation(dev, taskmap, cmg_id, blade);
         if (alloc)
         {
@@ -551,7 +557,7 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
             spin_lock(&cmgdev->cmg_lock);
             if (test_bit(window, &cmgdev->bw_active))
             {
-                pr_info("Fujitsu HWB: Free window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
+                pr_info("Free window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
                 clear_bit(window, &cmgdev->bw_active);
                 clear_bit(window, &alloc->win_mask);
             }
@@ -561,7 +567,7 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
 
 unassign_blade_out:
     spin_unlock(&dev->dev_lock);
-    pr_info("Fujitsu HWB: Unassign returns %d\n", err);
+    pr_info("Unassign returns %d\n", err);
     return err;
 }
 
@@ -573,7 +579,7 @@ int oss_a64fx_hwb_unassign_blade_ioctl(struct a64fx_hwb_device *dev, unsigned lo
     struct fujitsu_hwb_ioc_bw_ctl ioc_bw_ctl;
     if (copy_from_user(&ioc_bw_ctl, (struct fujitsu_hwb_ioc_bw_ctl __user *)arg, sizeof(struct fujitsu_hwb_ioc_bw_ctl)))
     {
-        pr_err("Fujitsu HWB: Error to get bb_ctl data\n");
+        pr_err("Error to get bb_ctl data\n");
         return -1;
     }
     bb_id = (int)ioc_bw_ctl.bb;
@@ -583,7 +589,7 @@ int oss_a64fx_hwb_unassign_blade_ioctl(struct a64fx_hwb_device *dev, unsigned lo
     {
         if (copy_to_user((struct fujitsu_hwb_ioc_bw_ctl __user *)arg, &ioc_bw_ctl, sizeof(struct fujitsu_hwb_ioc_bw_ctl)))
         {
-            pr_err("Fujitsu HWB: Error to copy back bb_ctl data\n");
+            pr_err("Error to copy back bb_ctl data\n");
             return -1;
         }
         return 0;
