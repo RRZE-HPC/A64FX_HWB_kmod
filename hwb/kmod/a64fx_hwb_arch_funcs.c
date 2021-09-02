@@ -6,7 +6,7 @@
 #ifdef __ARM_ARCH_8A
 
 
-u64 read_hwb_ctrl()
+u64 read_hwb_ctrl(void)
 {
     //IMP_BARRIER_CTRL_EL1
     u64 val = 0;
@@ -118,7 +118,7 @@ void write_assign_sync_wr(int win, u64 val)
 }
 
 
-u64 read_display()
+u64 read_display(void)
 {
     u64 val = 0;
     asm ("MRS %0, S3_0_C11_C12_4" :: "r"(val));
