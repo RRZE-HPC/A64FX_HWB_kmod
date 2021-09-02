@@ -100,7 +100,7 @@ u64 read_assign_sync_wr(int win)
 
 void write_assign_sync_wr(int win, u64 val)
 {
-    switch(bb)
+    switch(win)
     {
         case 0:
             asm ("MSR S3_0_C15_C15_0, %0" : "=r"(val));
