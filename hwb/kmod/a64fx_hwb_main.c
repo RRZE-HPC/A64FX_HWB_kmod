@@ -71,6 +71,17 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
 {
     pr_info("Fujitsu HWB: Closing device\n");
+    int err = 0;
+    struct task_struct* task = get_current();
+    struct a64fx_task_mapping *taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
+    if (taskmap)
+    {
+        err = unregister_task(&oss_a64fx_hwb_device, taskmap);
+        if (err)
+        {
+            pr_info("Fujitsu HWB: Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
+        }
+    }
     return 0;
 }
 

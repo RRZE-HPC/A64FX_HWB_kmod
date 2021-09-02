@@ -139,7 +139,7 @@ static int free_allocation(struct a64fx_hwb_device *dev, struct a64fx_task_mappi
     return 0;
 }
 
-static struct a64fx_task_mapping * get_taskmap(struct a64fx_hwb_device *dev, struct task_struct* task)
+struct a64fx_task_mapping * get_taskmap(struct a64fx_hwb_device *dev, struct task_struct* task)
 {
     struct list_head* cur = NULL;
     struct a64fx_task_mapping *taskmap = NULL;
@@ -195,7 +195,7 @@ static struct a64fx_task_mapping * register_task(struct a64fx_hwb_device *dev, s
     return taskmap;
 }
 
-static int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap)
+int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *taskmap)
 {
     int i = 0;
     struct list_head *cur = NULL, *tmp = NULL;
