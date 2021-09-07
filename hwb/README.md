@@ -11,7 +11,7 @@ Each CMG (core-memory-group) contains 4 barrier blade and 6 barrier window regis
       |     +-----+ +-----+ +-----+ +-----+ +-----+ +-----+
       |     | BB0 | | BB1 | | BB2 | | BB3 | | BB4 | | BB5 |
       |     +-----+ +-----+ +-----+ +-----+ +-----+ +-----+
-    CMG     ^        ^       ^        ^       ^       ^
+    CMG      ^        ^       ^        ^       ^       ^
       |      | _______|_______|________|_______|_______|
       |      |/
       |     PE[0-12]
