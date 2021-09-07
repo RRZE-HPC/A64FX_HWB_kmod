@@ -100,7 +100,7 @@ int write_init_sync_bb(int blade, unsigned long bst_mask)
 int read_assign_sync_wr(int window, int* valid, int *blade)
 {
     u64 val = 0;
-    if ((window < 0) || (window >= MAX_BW_PER_CMG) || (!valid) || (!blade))
+    if ((window < 0) || (window >= MAX_BW_PER_CMG) || (!valid) || (!blade) || (blade >= MAX_BB_PER_CMG))
     {
         return -EINVAL;
     }
@@ -185,6 +185,29 @@ int read_bst_sync_wr(int window, int* sync)
             break;
     }
     *sync = val & A64FX_HWB_SYNC_WINDOW_MASK;
+    return 0;
+}
+
+int write_bst_sync_wr(int window, int sync)
+{
+    u64 val = sync & A64FX_HWB_SYNC_WINDOW_MASK;
+    if ((window < 0) || (window >= MAX_BW_PER_CMG))
+        return -EINVAL;
+    switch(window)
+    {
+        case 0:
+            asm volatile ("MRS S3_3_C15_C15_0, %0" : "r" (val));
+            break;
+        case 1:
+            asm volatile ("MRS S3_3_C15_C15_1, %0" : "r" (val));
+            break;
+        case 2:
+            asm volatile ("MRS S3_3_C15_C15_2, %0" : "r" (val));
+            break;
+        case 3:
+            asm volatile ("MRS S3_3_C15_C15_3, %0" : "r" (val));
+            break;
+    }
     return 0;
 }
 #endif

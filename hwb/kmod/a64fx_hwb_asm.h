@@ -27,5 +27,6 @@ int write_assign_sync_wr(int window, int valid, int blade);
 
 #define A64FX_HWB_SYNC_WINDOW_MASK 0x1
 int read_bst_sync_wr(int window, int* sync);
+int write_bst_sync_wr(int window, int sync);
 
 #endif /* A64FX_HWB_ASM_H */
