@@ -6,6 +6,8 @@
 #ifdef __ARM_ARCH_8A
 #include "a64fx_hwb_asm.h"
 
+
+
 int read_hwb_ctrl(int *el0ae, int *el1ae)
 {
     //IMP_BARRIER_CTRL_EL1
@@ -22,15 +24,24 @@ int write_hwb_ctrl(int el0ae, int el1ae)
 {
     //IMP_BARRIER_CTRL_EL1
     u64 val = 0;
+    asm volatile ("MRS %0, S3_0_C11_C12_0" : "=r"(val));
     if (el0ae)
     {
         val |= (1ULL<<A64FX_HWB_CTRL_EL0AE_SHIFT);
+    }
+    else
+    {
+        val &= ~(1ULL<<A64FX_HWB_CTRL_EL0AE_SHIFT);
     }
     if (el1ae)
     {
         val |= (1ULL<<A64FX_HWB_CTRL_EL1AE_SHIFT);
     }
-    asm volatile ("MSR S3_0_C11_C12_0,%0" :: "r"(val));
+    else
+    {
+        val &= ~(1ULL<<A64FX_HWB_CTRL_EL1AE_SHIFT);
+    }
+    asm volatile ("MSR S3_0_C11_C12_0, %0" :: "r"(val));
     return 0;
 }
 
@@ -71,7 +82,30 @@ int write_init_sync_bb(int blade, unsigned long bst_mask)
     {
         return -EINVAL;
     }
+    switch(blade)
+    {
+        case 0:
+            asm volatile ("MRS %0, S3_0_C15_C13_0" : "=r"(val));
+            break;
+        case 1:
+            asm volatile ("MRS %0, S3_0_C15_C13_1" : "=r"(val));
+            break;
+        case 2:
+            asm volatile ("MRS %0, S3_0_C15_C13_2" : "=r"(val));
+            break;
+        case 3:
+            asm volatile ("MRS %0, S3_0_C15_C13_3" : "=r"(val));
+            break;
+        case 4:
+            asm volatile ("MRS %0, S3_0_C15_C13_4" : "=r"(val));
+            break;
+        case 5:
+            asm volatile ("MRS %0, S3_0_C15_C13_5" : "=r"(val));
+            break;
+
+    }
     val |= (bst_mask & A64FX_HWB_INIT_BST_MASK) << A64FX_HWB_INIT_BST_SHIFT;
+    val &= ~(0x1FFF & A64FX_HWB_INIT_BST_MASK)
     switch(blade)
     {
         case 0:
@@ -129,10 +163,29 @@ int write_assign_sync_wr(int window, int valid, int blade)
     u64 val = 0;
     if ((window < 0) || (window >= MAX_BW_PER_CMG) || (blade < 0) || (blade >= MAX_BB_PER_CMG))
         return -EINVAL;
+    switch(window)
+    {
+        case 0:
+            asm volatile ("MSR S3_0_C15_C15_0, %0" :: "r"(val));
+            break;
+        case 1:
+            asm volatile ("MSR S3_0_C15_C15_1, %0" :: "r"(val));
+            break;
+        case 2:
+            asm volatile ("MSR S3_0_C15_C15_2, %0" :: "r"(val));
+            break;
+        case 3:
+            asm volatile ("MSR S3_0_C15_C15_3, %0" :: "r"(val));
+            break;
+    }
     val |= (blade & A64FX_HWB_ASSIGN_BB_MASK);
     if (valid)
     {
         val |= (1ULL<<A64FX_HWB_ASSIGN_VALID_BIT);
+    }
+    else
+    {
+        val &= ~(1ULL<<A64FX_HWB_ASSIGN_VALID_BIT);
     }
     switch(window)
     {
@@ -190,9 +243,25 @@ int read_bst_sync_wr(int window, int* sync)
 
 int write_bst_sync_wr(int window, int sync)
 {
-    u64 val = sync & A64FX_HWB_SYNC_WINDOW_MASK;
+    u64 val = 0;
     if ((window < 0) || (window >= MAX_BW_PER_CMG))
         return -EINVAL;
+    switch(window)
+    {
+        case 0:
+            asm volatile ("MRS %0, S3_3_C15_C15_0" : "=r" (val));
+            break;
+        case 1:
+            asm volatile ("MRS %0, S3_3_C15_C15_1" : "=r" (val));
+            break;
+        case 2:
+            asm volatile ("MRS %0, S3_3_C15_C15_2" : "=r" (val));
+            break;
+        case 3:
+            asm volatile ("MRS %0, S3_3_C15_C15_3" : "=r" (val));
+            break;
+    }
+    val |= sync & A64FX_HWB_SYNC_WINDOW_MASK;
     switch(window)
     {
         case 0:
@@ -210,5 +279,7 @@ int write_bst_sync_wr(int window, int sync)
     }
     return 0;
 }
+
+
 #endif
 
