@@ -365,8 +365,8 @@ int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, int cmg, struct cpumask
     }
     cmgdev = &dev->cmgs[cmg];
     err = -ENODEV;
-    bit = find_first_zero_bit(&cmgdev->bb_active, 64);
-    pr_info("Bit %d is zero, use it\n", bit);
+    bit = find_first_zero_bit(&cmgdev->bb_active, MAX_BB_PER_CMG);
+    pr_info("Blade %d is free, use it\n", bit);
     if (bit >= 0 && bit < dev->num_bb_per_cmg)
     {
         register_allocation(cmgdev, taskmap, bit);
