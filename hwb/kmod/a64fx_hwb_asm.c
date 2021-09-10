@@ -261,7 +261,14 @@ int write_bst_sync_wr(int window, int sync)
             asm volatile ("MRS %0, S3_3_C15_C15_3" : "=r" (val));
             break;
     }
-    val |= sync & A64FX_HWB_SYNC_WINDOW_MASK;
+    if (sync)
+    {
+        val |= sync & A64FX_HWB_SYNC_WINDOW_MASK;
+    }
+    else
+    {
+        val &= ~(sync & A64FX_HWB_SYNC_WINDOW_MASK);
+    }
     switch(window)
     {
         case 0:
