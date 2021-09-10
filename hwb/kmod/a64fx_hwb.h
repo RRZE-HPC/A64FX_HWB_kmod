@@ -13,13 +13,16 @@
 #define IMP_BARRIER_CTRL_EL1_EL0AE_BIT 62
 #define IMP_BARRIER_CTRL_EL1_EL1AE_BIT 63
 
+#define A64FX_HWB_UNASSIGNED_WIN (-1)
+#define A64FX_HWB_UNASSIGNED_BB (-1)
+
 struct a64fx_core_mapping {
     int cpu_id;
     int cmg_id;
     int ppe_id;
     int pe_id;
     int cmg_offset;
-    u32 bw_map;
+    unsigned long bw_map;
 };
 
 /*struct a64fx_bb_mapping {*/
@@ -49,17 +52,18 @@ struct a64fx_cmg_device {
     unsigned long bb_active;
     unsigned long bw_active;
     struct kobject kobj;
+    struct cpumask cmgmask;
     struct a64fx_core_mapping pe_map[MAX_PE_PER_CMG];
-    long unsigned int bb_map[MAX_BB_PER_CMG];
-    long unsigned int bw_map[MAX_BW_PER_CMG];
-/*    struct a64fx_bw_mapping bw_map[MAX_BW_PER_CMG];*/
+    int bw_map[MAX_BW_PER_CMG];
     spinlock_t cmg_lock;
 };
 
 struct a64fx_task_allocation {
-    u8 bb;
+    u8 blade;
     u8 cmg;
     long unsigned int win_mask;
+    int window;
+    refcount_t assign_count;
     struct task_struct* task;
     struct list_head list;
 };
@@ -71,7 +75,7 @@ struct a64fx_task_mapping {
     struct list_head list;
     struct list_head allocs;
     //struct a64fx_task_allocation allocations[MAX_NUM_CMG*MAX_BB_PER_CMG];
-    int num_allocs;
+    refcount_t num_allocs;
 };
 
 struct a64fx_hwb_device {
@@ -82,10 +86,9 @@ struct a64fx_hwb_device {
     struct a64fx_cmg_device cmgs[MAX_NUM_CMG];
     struct miscdevice misc;
     spinlock_t dev_lock;
-    refcount_t refcount;
-    int num_tasks;
+    refcount_t active_count;
+    refcount_t num_tasks;
     struct list_head task_list;
-    struct a64fx_task_mapping tasks[MAX_NUM_CMG*MAX_BB_PER_CMG];
 };
 
 
