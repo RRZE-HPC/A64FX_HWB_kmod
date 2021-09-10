@@ -63,6 +63,8 @@ struct a64fx_task_allocation {
     u8 cmg;
     long unsigned int win_mask;
     int window;
+    int assign_count_safe;
+    struct cpumask assign_mask;
     refcount_t assign_count;
     struct task_struct* task;
     struct list_head list;
@@ -76,6 +78,7 @@ struct a64fx_task_mapping {
     struct list_head allocs;
     //struct a64fx_task_allocation allocations[MAX_NUM_CMG*MAX_BB_PER_CMG];
     refcount_t num_allocs;
+    int num_allocs_safe;
 };
 
 struct a64fx_hwb_device {
@@ -87,7 +90,9 @@ struct a64fx_hwb_device {
     struct miscdevice misc;
     spinlock_t dev_lock;
     refcount_t active_count;
+    int active_count_safe;
     refcount_t num_tasks;
+    int num_tasks_safe;
     struct list_head task_list;
 };
 

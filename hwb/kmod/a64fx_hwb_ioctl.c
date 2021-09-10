@@ -159,7 +159,10 @@ static struct a64fx_task_allocation * new_allocation(struct a64fx_cmg_device *cm
     alloc->win_mask = 0x0;
     alloc->window = A64FX_HWB_UNASSIGNED_WIN;
     alloc->task = taskmap->task;
+    INIT_LIST_HEAD(&alloc->list);
     refcount_set(&alloc->assign_count, 0);
+    alloc->assign_count_safe = 0;
+    cpumask_clear(&alloc->assign_mask);
     info.blade = blade;
     info.cmg = cmg->cmg_id;
     cpumask_to_ppemask(cmg, taskmap->cpumask, &info.ppemask);
@@ -170,7 +173,8 @@ static struct a64fx_task_allocation * new_allocation(struct a64fx_cmg_device *cm
     pr_info("Add allocation for task %d\n", taskmap->task->pid);
     list_add(&alloc->list, &taskmap->allocs);
     refcount_inc(&taskmap->num_allocs);
-    pr_info("Task %d has %d allocations\n", taskmap->task->pid, refcount_read(&taskmap->num_allocs));
+    taskmap->num_allocs_safe++;
+    pr_info("Task %d has %d/%d allocations\n", task_pid_nr(taskmap->task), refcount_read(&taskmap->num_allocs), taskmap->num_allocs_safe);
     return 0;
 }
 
@@ -187,15 +191,41 @@ static struct a64fx_task_allocation * register_allocation(struct a64fx_cmg_devic
 
 static int free_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mapping *taskmap, struct a64fx_task_allocation* alloc)
 {
+    int i = 0;
     struct hwb_allocate_info info = {0, 0UL};
     if (test_bit(alloc->blade, &cmg->bb_active))
     {
+        int cpu = 0;
         int assign_count = refcount_read(&alloc->assign_count);
-        if (assign_count > 0)
+        if (alloc->assign_count_safe > 0)
         {
-            pr_err("Allocation (PID %d CMG %d Blade %d) still assigned by %d threads\n", taskmap->task->pid, alloc->cmg, alloc->blade, assign_count);
+            struct a64fx_core_mapping* pemap = NULL;
+            pr_err("Allocation (PID %d CMG %d Blade %d) still assigned by %d/%d threads\n", task_pid_nr(taskmap->task), alloc->cmg, alloc->blade, assign_count, alloc->assign_count_safe);
+            for_each_cpu(cpu, &alloc->assign_mask)
+            {
+                int cpuid = get_cpu();
+                for (i = 0; i < cmg->num_pes; i++)
+                {
+                    if (cmg->pe_map[i].cpu_id == cpuid)
+                    {
+                        pemap = &cmg->pe_map[i];
+                        break;
+                    }
+                }
+                pr_info("Clear window %d on CPU %d\n", alloc->window, cpuid);
+                write_assign_sync_wr(alloc->window, 0, 0);
+                cpumask_clear_cpu(cpuid, &alloc->assign_mask);
+                clear_bit(alloc->window, &pemap->bw_map);
+                alloc->assign_count_safe--;
+                if (alloc->assign_count_safe == 0)
+                {
+                    alloc->window = A64FX_HWB_UNASSIGNED_WIN;
+                    alloc->win_mask = 0x0;
+                }
+                put_cpu();
+            }
         }
-        pr_info("PID %d free BB %d at CMG %d\n", taskmap->task->pid, alloc->blade, alloc->cmg);
+        pr_info("PID %d free BB %d at CMG %d\n", task_pid_nr(taskmap->task), alloc->blade, alloc->cmg);
         info.blade = alloc->blade;
         info.cmg = alloc->cmg;
         info.ppemask = 0x0UL;
@@ -204,11 +234,12 @@ static int free_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mappi
     }
     else
     {
-        pr_info("AAAH! Task %d free inactive Blade %d at CMG %d\n", taskmap->task->pid, alloc->blade, alloc->cmg);
+        pr_info("AAAH! Task %d free inactive Blade %d at CMG %d\n", task_pid_nr(taskmap->task), alloc->blade, alloc->cmg);
     }
     list_del(&alloc->list);
     kfree(alloc);
     refcount_dec(&taskmap->num_allocs);
+    taskmap->num_allocs_safe--;
     return 0;
 }
 
@@ -216,7 +247,7 @@ struct a64fx_task_mapping * get_taskmap(struct a64fx_hwb_device *dev, struct tas
 {
     struct list_head* cur = NULL;
     struct a64fx_task_mapping *taskmap = NULL;
-    pr_info("Get task %d (TGID %d)\n", task->pid, task_tgid_nr(task));
+    pr_info("Get task (PID %d TGID %d)\n", task_pid_nr(task), task_tgid_nr(task));
     list_for_each(cur, &dev->task_list)
     {
         taskmap = list_entry(cur, struct a64fx_task_mapping, list);
@@ -242,14 +273,16 @@ static struct a64fx_task_mapping * new_taskmap(struct a64fx_hwb_device *dev, str
     {
         return NULL;
     }
-    pr_info("New task %d\n", task->pid);
+    pr_info("New task (PID %d TGID %d)\n", task_pid_nr(task), task_tgid_nr(task));
     taskmap->task = task;
     refcount_set(&taskmap->num_allocs, 0);
+    taskmap->num_allocs_safe = 0;
     cpumask_copy(&taskmap->cpumask, &cpumask);
     INIT_LIST_HEAD(&taskmap->list);
     INIT_LIST_HEAD(&taskmap->allocs);
     list_add(&taskmap->list, &dev->task_list);
     refcount_inc(&dev->num_tasks);
+    dev->num_tasks_safe++;
     pr_info("Currently %d tasks with allocations\n", refcount_read(&dev->num_tasks));
     return taskmap;
 
@@ -265,9 +298,9 @@ int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *tas
     {
         pr_info("Remove task %d\n", task_pid_nr(taskmap->task));
         num_allocs = refcount_read(&taskmap->num_allocs);
-        if (num_allocs > 0)
+        if (taskmap->num_allocs_safe > 0)
         {
-            pr_info("Task %d has %d allocations left, free all\n", task_pid_nr(taskmap->task), num_allocs);
+            pr_info("Task %d has %d allocations left, free all\n", task_pid_nr(taskmap->task), taskmap->num_allocs_safe);
             list_for_each_safe(cur, tmp, &taskmap->allocs)
             {
                 struct a64fx_cmg_device *cmg = NULL;
@@ -281,7 +314,8 @@ int unregister_task(struct a64fx_hwb_device *dev, struct a64fx_task_mapping *tas
         list_del(&taskmap->list);
         kfree(taskmap);
         refcount_dec(&dev->num_tasks);
-        pr_info("Currently %d tasks with allocations\n", refcount_read(&dev->num_tasks));
+        dev->num_tasks_safe--;
+        pr_info("Currently %d/%d tasks with allocations\n", refcount_read(&dev->num_tasks), dev->num_tasks_safe);
     }
     return 0;
 }
@@ -476,7 +510,7 @@ int oss_a64fx_hwb_free(struct a64fx_hwb_device *dev, int cmg_id, int blade)
             goto free_exit;
         }
         free_allocation(cmg, taskmap, alloc);
-        if (refcount_read(&taskmap->num_allocs) == 0)
+        if (refcount_read(&taskmap->num_allocs) == 0 && taskmap->num_allocs_safe == 0)
         {
             pr_info("Task has no more allocations, unregister it\n");
             unregister_task(dev, taskmap);
@@ -562,6 +596,10 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
                     pr_info("Reuse window %d", window);
                 }
             }
+            else
+            {
+                pr_info("User has given window %d\n", window);
+            }
             
             if (window >= 0 && window < MAX_BW_PER_CMG && (!test_bit(window, &pe->bw_map)))
             {
@@ -587,11 +625,17 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
                     }
                     pr_info("Set window %d for CPU %d/%d\n", window, pe->cpu_id, cpuid);
                     set_bit(window, &pe->bw_map);
+                    cpumask_set_cpu(pe->cpu_id, &alloc->assign_mask);
                     refcount_inc(&alloc->assign_count);
-                    pr_info("%d Threads assigned to allocation (TGID %d CMG %d Blade %d)\n", refcount_read(&alloc->assign_count), task_tgid_nr(taskmap->task), cmg_id, blade);
+                    alloc->assign_count_safe++;
+                    pr_info("%d/%d Threads assigned to allocation (TGID %d CMG %d Blade %d)\n", refcount_read(&alloc->assign_count), alloc->assign_count_safe, task_tgid_nr(taskmap->task), cmg_id, blade);
                     *outwindow = window;
                     err = 0;
                 }
+            }
+            else
+            {
+                pr_info("Invalid window %d or already in use\n", window);
             }
             spin_unlock(&cmgdev->cmg_lock);
         }
@@ -684,6 +728,7 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
                         clear_bit(window, &pe->bw_map);
                         pr_info("Clear window %d assign (CPU %d/%d CMG %d Blade %d)\n", window, pe->cpu_id, cpuid, cmg_id, blade);
                         write_assign_sync_wr(window, 0, 0);
+                        alloc->assign_count_safe--;
                         if (refcount_dec_and_test(&alloc->assign_count))
                         {
                             pr_info("Remove mapping window %d on CMG %d to Blade %d\n", window, cmg_id, blade);
@@ -691,10 +736,11 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
                             clear_bit(window, &alloc->win_mask);
                             pr_info("Clear window %d for CPU %d/%d\n", window, pe->cpu_id, cpuid);
                             clear_bit(window, &pe->bw_map);
+                            cpumask_clear_cpu(pe->cpu_id, &alloc->assign_mask);
 /*                            cmgdev->bw_map[window] = 0;*/
                         }
                         err = 0;
-                        pr_info("%d Threads assigned to allocation (TGID %d CMG %d Blade %d)\n", refcount_read(&alloc->assign_count), task_tgid_nr(taskmap->task), cmg_id, blade);
+                        pr_info("%d/%d Threads assigned to allocation (TGID %d CMG %d Blade %d)\n", refcount_read(&alloc->assign_count), alloc->assign_count_safe, task_tgid_nr(taskmap->task), cmg_id, blade);
                     }
                     else
                     {

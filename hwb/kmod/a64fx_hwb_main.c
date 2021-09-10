@@ -61,8 +61,10 @@ static struct a64fx_hwb_device oss_a64fx_hwb_device = {
     },
     .task_list = LIST_HEAD_INIT(oss_a64fx_hwb_device.task_list),
     .num_tasks = REFCOUNT_INIT(0),
+    .num_tasks_safe = 0,
     .num_cmgs = 0,
     .active_count = REFCOUNT_INIT(0),
+    .active_count_safe = 0,
 };
 
 struct hwb_ctrl_info {
@@ -74,16 +76,17 @@ static void oss_a64fx_hwb_ctrl_func(void* info)
 {
     struct hwb_ctrl_info* cinfo = (struct hwb_ctrl_info*) info;
     write_hwb_ctrl(cinfo->el0ae, cinfo->el1ae);
+    read_hwb_ctrl(&cinfo->el0ae, &cinfo->el1ae);
 }
 
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
     int i = 0;
     u64 val = 0;
-/*    pr_info("Opening device\n");*/
+    pr_info("Opening device\n");
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
 
-    if (refcount_read(&oss_a64fx_hwb_device.active_count) == 0)
+    if (oss_a64fx_hwb_device.active_count_safe == 0)
     {
 #ifdef __ARM_ARCH_8A
         struct hwb_ctrl_info info = {1, 1};
@@ -91,10 +94,13 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
         {
             pr_info("Allowing HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
             smp_call_function_any(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
+            pr_info("Allowing HWB access at CMG%d: EL0 %d EL1 %d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id, info.el0ae, info.el1ae);
         }
 #endif
     }
     refcount_inc(&oss_a64fx_hwb_device.active_count);
+    oss_a64fx_hwb_device.active_count_safe++;
+    pr_info("Active Tasks %d/%d\n", refcount_read(&oss_a64fx_hwb_device.active_count), oss_a64fx_hwb_device.active_count_safe);
     spin_unlock(&oss_a64fx_hwb_device.dev_lock);
     return 0;
 }
@@ -108,9 +114,10 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
     struct task_struct* task = get_current();
     struct a64fx_task_mapping *taskmap = NULL;
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
-/*    pr_info("Closing device\n");*/
-    if (refcount_read(&oss_a64fx_hwb_device.active_count) > 0)
+    pr_info("Closing device (Active %d)\n", oss_a64fx_hwb_device.active_count_safe);
+    if (oss_a64fx_hwb_device.active_count_safe > 0)
     {
+        oss_a64fx_hwb_device.active_count_safe--;
         diable_hwb = refcount_dec_and_test(&oss_a64fx_hwb_device.active_count);
         taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
         if (taskmap)
@@ -122,7 +129,7 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
             }
         }
 
-        if (diable_hwb)
+        if (oss_a64fx_hwb_device.active_count_safe == 0)
         {
 #ifdef __ARM_ARCH_8A
             struct hwb_ctrl_info info = {0, 0};
@@ -134,6 +141,11 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
 #endif
         }
     }
+    else
+    {
+        pr_err("Close on not opened device\n");
+    }
+    pr_info("Active Tasks %d/%d\n", refcount_read(&oss_a64fx_hwb_device.active_count), oss_a64fx_hwb_device.active_count_safe);
     spin_unlock(&oss_a64fx_hwb_device.dev_lock);
     return 0;
 }
