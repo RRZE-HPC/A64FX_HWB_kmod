@@ -166,16 +166,16 @@ int write_assign_sync_wr(int window, int valid, int blade)
     switch(window)
     {
         case 0:
-            asm volatile ("MSR S3_0_C15_C15_0, %0" :: "r"(val));
+            asm volatile ("MRS %0, S3_0_C15_C15_0" : "=r" (val));
             break;
         case 1:
-            asm volatile ("MSR S3_0_C15_C15_1, %0" :: "r"(val));
+            asm volatile ("MRS %0, S3_0_C15_C15_1" : "=r" (val));
             break;
         case 2:
-            asm volatile ("MSR S3_0_C15_C15_2, %0" :: "r"(val));
+            asm volatile ("MRS %0, S3_0_C15_C15_2" : "=r" (val));
             break;
         case 3:
-            asm volatile ("MSR S3_0_C15_C15_3, %0" :: "r"(val));
+            asm volatile ("MRS %0, S3_0_C15_C15_3" : "=r" (val));
             break;
     }
     val |= (blade & A64FX_HWB_ASSIGN_BB_MASK);
