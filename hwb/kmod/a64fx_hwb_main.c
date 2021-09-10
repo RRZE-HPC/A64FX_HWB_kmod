@@ -13,6 +13,7 @@
 #include "a64fx_hwb_cmg.h"
 #include "fujitsu_hpc_ioctl.h"
 #include "a64fx_hwb_ioctl.h"
+#include "a64fx_hwb_asm.h"
 
 static long oss_a64fx_hwb_ioctl(struct file *file, unsigned int ioc, unsigned long arg);
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file);
@@ -59,35 +60,58 @@ static struct a64fx_hwb_device oss_a64fx_hwb_device = {
         .mode = 0666,
     },
     .task_list = LIST_HEAD_INIT(oss_a64fx_hwb_device.task_list),
-    .num_tasks = 0,
+    .num_tasks = REFCOUNT_INIT(0),
     .num_cmgs = 0,
-    .refcount = REFCOUNT_INIT(0),
+    .active_count = REFCOUNT_INIT(0),
 };
+
+struct hwb_ctrl_info {
+    int el0ae;
+    int el1ae;
+};
+
+static void oss_a64fx_hwb_ctrl_func(void* info)
+{
+    struct hwb_ctrl_info* cinfo = (struct hwb_ctrl_info*) info;
+    write_hwb_ctrl(cinfo->el0ae, cinfo->el1ae);
+}
 
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
+    int i = 0;
     u64 val = 0;
-    pr_info("Opening device\n");
-    refcount_inc(&oss_a64fx_hwb_device.refcount);
+/*    pr_info("Opening device\n");*/
+    spin_lock(&oss_a64fx_hwb_device.dev_lock);
+
+    if (refcount_read(&oss_a64fx_hwb_device.active_count) == 0)
+    {
 #ifdef __ARM_ARCH_8A
-    asm ("MRS %0, S3_0_C11_C12_0" ::"r"(val));
-    val |= (1ULL<<IMP_BARRIER_CTRL_EL1_EL0AE_BIT);
-    val |= (1ULL<<IMP_BARRIER_CTRL_EL1_EL1AE_BIT);
-    asm ("MSR S3_0_C11_C12_0,%0" :"=r"(val));
+        struct hwb_ctrl_info info = {1, 1};
+        for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
+        {
+            pr_info("Allowing HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
+            smp_call_function_any(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
+        }
 #endif
+    }
+    refcount_inc(&oss_a64fx_hwb_device.active_count);
+    spin_unlock(&oss_a64fx_hwb_device.dev_lock);
     return 0;
 }
 
 static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
 {
+    int i = 0;
     int err = 0;
+    int diable_hwb = 0;
     u64 val = 0;
     struct task_struct* task = get_current();
     struct a64fx_task_mapping *taskmap = NULL;
-    pr_info("Closing device\n");
-    if (refcount_read(&oss_a64fx_hwb_device.refcount) > 0)
+    spin_lock(&oss_a64fx_hwb_device.dev_lock);
+/*    pr_info("Closing device\n");*/
+    if (refcount_read(&oss_a64fx_hwb_device.active_count) > 0)
     {
-        refcount_dec(&oss_a64fx_hwb_device.refcount);
+        diable_hwb = refcount_dec_and_test(&oss_a64fx_hwb_device.active_count);
         taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
         if (taskmap)
         {
@@ -97,16 +121,20 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
                 pr_info("Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
             }
         }
-#ifdef __ARM_ARCH_8A
-        if (refcount_read(&oss_a64fx_hwb_device.refcount) == 0)
+
+        if (diable_hwb)
         {
-            asm ("MRS %0, S3_0_C11_C12_0" ::"r"(val));
-            val &= ~(1ULL<<IMP_BARRIER_CTRL_EL1_EL0AE_BIT);
-            val &= ~(1ULL<<IMP_BARRIER_CTRL_EL1_EL1AE_BIT);
-            asm ("MSR S3_0_C11_C12_0,%0" :"=r"(val));
-        }
+#ifdef __ARM_ARCH_8A
+            struct hwb_ctrl_info info = {0, 0};
+            for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
+            {
+                pr_info("Disabling HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
+                smp_call_function_any(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
+            }
 #endif
+        }
     }
+    spin_unlock(&oss_a64fx_hwb_device.dev_lock);
     return 0;
 }
 
@@ -116,7 +144,7 @@ static long oss_a64fx_hwb_ioctl(struct file *file, unsigned int ioc, unsigned lo
     
     switch (ioc) {
         case FUJITSU_HWB_IOC_GET_PE_INFO:
-            pr_info("FUJITSU_HWB_IOC_GET_PE_INFO...\n");
+/*            pr_info("FUJITSU_HWB_IOC_GET_PE_INFO...\n");*/
             err = oss_a64fx_hwb_get_peinfo_ioctl(arg);
             break;
         case FUJITSU_HWB_IOC_BW_ASSIGN:
@@ -129,12 +157,15 @@ static long oss_a64fx_hwb_ioctl(struct file *file, unsigned int ioc, unsigned lo
             break;
         case FUJITSU_HWB_IOC_BB_ALLOC:
             pr_info("FUJITSU_HWB_IOC_BB_ALLOC...\n");
-            err = oss_a64fx_hwb_allocate(&oss_a64fx_hwb_device, arg);
+            err = oss_a64fx_hwb_allocate_ioctl(&oss_a64fx_hwb_device, arg);
             break;
         case FUJITSU_HWB_IOC_BB_FREE:
             pr_info("FUJITSU_HWB_IOC_BB_FREE...\n");
             err = oss_a64fx_hwb_free_ioctl(&oss_a64fx_hwb_device, arg);
             break;
+        case FUJITSU_HWB_IOC_RESET:
+            pr_info("FUJITSU_HWB_IOC_RESET...\n");
+            err = oss_a64fx_hwb_reset_ioctl(&oss_a64fx_hwb_device, arg);
         default:
             err = -ENOTTY;
             break;
