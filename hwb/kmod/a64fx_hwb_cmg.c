@@ -8,6 +8,7 @@
 
 #include "a64fx_hwb.h"
 #include "a64fx_hwb_cmg.h"
+#include "a64fx_hwb_asm.h"
 #include "a64fx_hwb_ioctl.h"
 
 static inline struct a64fx_cmg_device *kobj_to_cmg(struct kobject *kobj)
@@ -42,52 +43,65 @@ static ssize_t used_bw_bmap_show(struct kobject *kobj, struct kobj_attribute * a
     struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
     for (i = 0; i < cmg->num_pes; i++)
     {
-        slen += snprintf(&buf[slen], PAGE_SIZE-slen, "%d %.4x\n", cmg->pe_map[i].cpu_id, cmg->pe_map[i].bw_map);
+        slen += snprintf(&buf[slen], PAGE_SIZE-slen, "%d %.4lx\n", cmg->pe_map[i].cpu_id, cmg->pe_map[i].bw_map);
     }
     buf[slen] = '\0';
     return slen;
 }
 
+struct bb_show_info {
+    int blade;
+    unsigned long mask;
+    unsigned long bst;
+};
+
+static void _init_sync_bb_show_func(void* info)
+{
+    struct bb_show_info* bbinfo = (struct bb_show_info*)info;
+    read_init_sync_bb(bbinfo->blade, &bbinfo->mask, &bbinfo->bst);
+}
+
+static ssize_t init_sync_bb_show(struct a64fx_cmg_device *cmg, int blade, char* buf)
+{
+    struct bb_show_info info = {blade, 0U, 0U};
+    smp_call_function_any(&cmg->cmgmask, _init_sync_bb_show_func, &info, 1);
+    return scnprintf(buf, PAGE_SIZE, "%.4lx\n%.4lx\n", info.mask, info.bst);
+}
+
 static ssize_t init_sync_bb0_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
 {
-    u32 mask = 0x0U;
-    u32 bst = 0x0U;
-    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+    struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
+    return init_sync_bb_show(cmg, 0, buf);
 }
 
 static ssize_t init_sync_bb1_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
 {
-    u32 mask = 0x0U;
-    u32 bst = 0x0U;
-    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+    struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
+    return init_sync_bb_show(cmg, 1, buf);
 }
 
 static ssize_t init_sync_bb2_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
 {
-    u32 mask = 0x0U;
-    u32 bst = 0x0U;
-    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+    struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
+    return init_sync_bb_show(cmg, 2, buf);
 }
 
 static ssize_t init_sync_bb3_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
 {
-    u32 mask = 0x0U;
-    u32 bst = 0x0U;
-    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+    struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
+    return init_sync_bb_show(cmg, 3, buf);
 }
 
 static ssize_t init_sync_bb4_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
 {
-    u32 mask = 0x0U;
-    u32 bst = 0x0U;
-    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+    struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
+    return init_sync_bb_show(cmg, 4, buf);
 }
 
 static ssize_t init_sync_bb5_show(struct kobject *kobj, struct kobj_attribute * attr, char* buf)
 {
-    u32 mask = 0x0U;
-    u32 bst = 0x0U;
-    return scnprintf(buf, PAGE_SIZE, "%.4x\n%.4x\n", mask, bst);
+    struct a64fx_cmg_device *cmg = kobj_to_cmg(kobj);
+    return init_sync_bb_show(cmg, 5, buf);
 }
 
 static struct kobj_attribute core_map_attr = __ATTR(core_map, 0444, core_map_show, NULL);
@@ -121,6 +135,15 @@ static struct attribute_group cmg_group_attrs = {
 };
 
 
+void init_cmgmask(struct a64fx_cmg_device* dev)
+{
+    int i = 0;
+    for (i = 0; i < dev->num_pes; i++)
+    {
+        cpumask_set_cpu(dev->pe_map[i].cpu_id, &dev->cmgmask);
+    }
+}
+
 
 int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* parent)
 {
@@ -131,11 +154,12 @@ int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* par
     dev->bb_active = 0x0U;
     dev->cmg_id = cmg_id;
     spin_lock_init(&dev->cmg_lock);
+    init_cmgmask(dev);
 
     if (!kobjtype)
     {
         pr_info("create Test kobj to get default kobjtype\n");
-        kobj = kobject_create_and_add("TeST", parent);
+        kobj = kobject_create_and_add("Test", parent);
         kobjtype = get_ktype(kobj);
         kobject_put(kobj);
     }
