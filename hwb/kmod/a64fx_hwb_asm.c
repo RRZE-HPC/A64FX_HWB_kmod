@@ -263,11 +263,11 @@ int write_bst_sync_wr(int window, int sync)
     }
     if (sync)
     {
-        val |= sync & A64FX_HWB_SYNC_WINDOW_MASK;
+        val |= 0x1 & A64FX_HWB_SYNC_WINDOW_MASK;
     }
     else
     {
-        val &= ~(sync & A64FX_HWB_SYNC_WINDOW_MASK);
+        val &= ~(0x1 & A64FX_HWB_SYNC_WINDOW_MASK);
     }
     switch(window)
     {
