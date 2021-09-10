@@ -105,7 +105,7 @@ int write_init_sync_bb(int blade, unsigned long bst_mask)
 
     }
     val |= (bst_mask & A64FX_HWB_INIT_BST_MASK) << A64FX_HWB_INIT_BST_SHIFT;
-    val &= ~(0x1FFF & A64FX_HWB_INIT_BST_MASK)
+    val &= ~(0x1FFF & A64FX_HWB_INIT_BST_MASK);
     switch(blade)
     {
         case 0:
