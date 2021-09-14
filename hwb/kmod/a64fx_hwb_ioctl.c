@@ -122,6 +122,21 @@ static void oss_a64fx_hwb_allocate_func(void* info)
     pr_info("write_init_sync_bb (CMG %d, Blade %d, PPEmask 0x%lX) on CPU %d\n", ainfo->cmg, ainfo->blade, ainfo->ppemask, smp_processor_id());
 }
 
+struct hwb_assign_info {
+    int cpu;
+    int cmg;
+    int blade;
+    int valid;
+    int window;
+};
+
+static void oss_a64fx_hwb_assign_func(void* info)
+{
+    struct hwb_assign_info* ainfo = (struct hwb_assign_info*) info;
+    write_assign_sync_wr(ainfo->window, ainfo->valid, ainfo->blade);
+    pr_info("write_assign_sync_wr (CMG %d, Blade %d, Window %d, Valid %d) on CPU %d\n", ainfo->cmg, ainfo->blade, ainfo->window, ainfo->valid, smp_processor_id());
+}
+
 
 static struct a64fx_task_allocation * get_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mapping *taskmap, int blade)
 {
@@ -203,18 +218,25 @@ static int free_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mappi
             pr_err("Allocation (PID %d CMG %d Blade %d) still assigned by %d/%d threads\n", task_pid_nr(taskmap->task), alloc->cmg, alloc->blade, assign_count, alloc->assign_count_safe);
             for_each_cpu(cpu, &alloc->assign_mask)
             {
-                int cpuid = get_cpu();
+                struct hwb_assign_info info = {
+                    .cpu = cpu,
+                    .window = alloc->window,
+                    .cmg = alloc->cmg,
+                    .blade = 0,
+                    .valid = 0,
+                };
                 for (i = 0; i < cmg->num_pes; i++)
                 {
-                    if (cmg->pe_map[i].cpu_id == cpuid)
+                    if (cmg->pe_map[i].cpu_id == cpu)
                     {
                         pemap = &cmg->pe_map[i];
                         break;
                     }
                 }
-                pr_info("Clear window %d on CPU %d\n", alloc->window, cpuid);
-                write_assign_sync_wr(alloc->window, 0, 0);
-                cpumask_clear_cpu(cpuid, &alloc->assign_mask);
+                pr_info("Clear window %d on CPU %d\n", alloc->window, cpu);
+                smp_call_function_single(pemap->cpu_id, oss_a64fx_hwb_assign_func, &info, 1);
+/*                write_assign_sync_wr(alloc->window, 0, 0);*/
+                cpumask_clear_cpu(cpu, &alloc->assign_mask);
                 clear_bit(alloc->window, &pemap->bw_map);
                 alloc->assign_count_safe--;
                 if (alloc->assign_count_safe == 0)
@@ -616,8 +638,16 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
 /*                    set_bit(window, &cmgdev->bw_active);*/
 /*                    pr_info("Map window %d on CMG %d to Blade %d\n", window, cmg_id, blade);*/
 /*                    cmgdev->bw_map[window] = blade;*/
+                    struct hwb_assign_info info = {
+                        .cpu = pe->cpu_id,
+                        .window = window,
+                        .cmg = cmg_id,
+                        .blade = blade,
+                        .valid = 1
+                    };
                     pr_info("Write window %d assign (CPU %d/%d CMG %d Blade %d)\n", window, pe->cpu_id, cpuid, cmg_id, blade);
-                    write_assign_sync_wr(window, 1, blade);
+                    smp_call_function_single(pe->cpu_id, oss_a64fx_hwb_assign_func, &info, 1);
+/*                    write_assign_sync_wr(window, 1, blade);*/
                     if (alloc->window == A64FX_HWB_UNASSIGNED_WIN)
                     {
                         pr_info("Store window %d on CMG %d to Blade %d in allocation\n", window, cmg_id, blade);
@@ -725,10 +755,18 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
                     read_assign_sync_wr(window, &valid, &bb);
                     if (bb == blade)
                     {
+                        struct hwb_assign_info info = {
+                            .cpu = pe->cpu_id,
+                            .window = window,
+                            .cmg = cmg_id,
+                            .blade = 0,
+                            .valid = 0
+                        };
                         pr_info("Free window %d for CMG %d and Blade %d\n", window, cmg_id, blade);
                         clear_bit(window, &pe->bw_map);
                         pr_info("Clear window %d assign (CPU %d/%d CMG %d Blade %d)\n", window, pe->cpu_id, cpuid, cmg_id, blade);
-                        write_assign_sync_wr(window, 0, 0);
+                        smp_call_function_single(pe->cpu_id, oss_a64fx_hwb_assign_func, &info, 1);
+/*                        write_assign_sync_wr(window, 0, 0);*/
                         alloc->assign_count_safe--;
                         if (refcount_dec_and_test(&alloc->assign_count))
                         {
@@ -802,11 +840,17 @@ void asm_reset_func(void* info)
     int i = 0;
     for (i = 0; i < MAX_BW_PER_CMG; i++)
     {
+        int valid, blade;
+        read_assign_sync_wr(i, &valid, &blade);
+        pr_info("Reset CPU %d: Win %d Valid %d Blade %d\n", smp_processor_id(), i, valid, blade);
         write_assign_sync_wr(i, 0, 0);
         write_bst_sync_wr(i, 0);
     }
     for (i = 0; i < MAX_BB_PER_CMG; i++)
     {
+        unsigned long bst, bst_mask;
+        read_init_sync_bb(i, &bst, &bst_mask);
+        pr_info("Reset CPU %d: Blade %d BST 0x%lx BSTMASK 0x%lx\n", smp_processor_id(), i, bst, bst_mask);
         write_init_sync_bb(i, 0x0);
     }
     write_hwb_ctrl(0, 0);
