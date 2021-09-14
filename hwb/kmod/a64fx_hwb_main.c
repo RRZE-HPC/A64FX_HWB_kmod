@@ -82,6 +82,7 @@ static void oss_a64fx_hwb_ctrl_func(void* info)
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
     int i = 0;
+    int cpu = 0;
     u64 val = 0;
     pr_info("Opening device\n");
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
@@ -93,8 +94,11 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
         for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
         {
             pr_info("Allowing HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
-            smp_call_function_any(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
-            pr_info("Allowing HWB access at CMG%d: EL0 %d EL1 %d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id, info.el0ae, info.el1ae);
+            for_each_cpu(cpu, &oss_a64fx_hwb_device.cmgs[i].cmgmask)
+            {
+                smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
+/*                pr_info("Allowing HWB access at CMG%d CPU%d: EL0 %d EL1 %d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id, cpu, info.el0ae, info.el1ae);*/
+            }
         }
 #endif
     }
@@ -109,6 +113,7 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
 {
     int i = 0;
     int err = 0;
+    int cpu = 0;
     int diable_hwb = 0;
     u64 val = 0;
     struct task_struct* task = get_current();
@@ -135,8 +140,12 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
             struct hwb_ctrl_info info = {0, 0};
             for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
             {
-                pr_info("Disabling HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
-                smp_call_function_any(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
+                pr_info("Disable HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
+                for_each_cpu(cpu, &oss_a64fx_hwb_device.cmgs[i].cmgmask)
+                {
+                    smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
+/*                    pr_info("Disable HWB access at CMG%d CPU%d: EL0 %d EL1 %d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id, cpu, info.el0ae, info.el1ae);*/
+                }
             }
 #endif
         }
