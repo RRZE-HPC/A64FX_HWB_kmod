@@ -24,7 +24,7 @@ static int pemask_to_cpumask(size_t pemask_size, unsigned long *pemask, struct c
         return -EINVAL;
     }
     cpumask_clear(cpumask);
-    size = (64 < pemask_size*8 ? 64 : pemask_size*8);
+    size = (64 < pemask_size*sizeof(unsigned long) ? 64 : pemask_size*sizeof(unsigned long));
     for (i = 0; i < size; i++)
     {
         if (*pemask & (1UL<<i))
@@ -61,13 +61,13 @@ static int check_cpumask(struct a64fx_hwb_device *dev, struct cpumask cpumask)
                     }
                     if (cmg != dev->cmgs[i].pe_map[j].cmg_id)
                     {
-                        return 1;
+                        return -1;
                     }
                 }
             }
         }
     }
-    return 0;
+    return cmg;
 }
 
 static int cpumask_to_ppemask(struct a64fx_cmg_device* cmg, struct cpumask cpumask, unsigned long* ppemask)
@@ -455,7 +455,7 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
         pr_err("Error to get bb_ctl pemask data\n");
         return -EINVAL;
     }
-    pr_info("Read pemask\n");
+    pr_info("Read pemask 0x%lX\n", mask);
     
     err = pemask_to_cpumask(ioc_bb_ctl.size, &mask, &cpumask);
     if (err == 0)
@@ -464,12 +464,12 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
         return -EINVAL;
     }
     err = check_cpumask(dev, cpumask);
-    if (err)
+    if (err < 0)
     {
         pr_err("cpumask spans multiple CMGs, contains only a single CPU or contains offline CPUs\n");
         return -EINVAL;
     }
-    cmg_id = (int)ioc_bb_ctl.cmg;
+    cmg_id = err;
     bb_id = (int)ioc_bb_ctl.bb;
     pr_info("Receive CMG %d and Blade %d from userspace\n", cmg_id, bb_id);
     err = oss_a64fx_hwb_allocate(dev, cmg_id, cpumask, &bb_id);
@@ -477,8 +477,9 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
     {
         return err;
     }
-    pr_info("Return blade %d to userspace\n", bb_id);
+    pr_info("Return CMG %d and blade %d to userspace\n", cmg_id, bb_id);
     ioc_bb_ctl.bb = (u8)bb_id;
+    ioc_bb_ctl.cmg = (u8)cmg_id;
     
     if (copy_to_user((struct fujitsu_hwb_ioc_bb_ctl __user *)arg, &ioc_bb_ctl, sizeof(struct fujitsu_hwb_ioc_bb_ctl __user)))
     {
