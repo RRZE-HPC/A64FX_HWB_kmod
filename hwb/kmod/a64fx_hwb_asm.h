@@ -15,6 +15,7 @@ int write_hwb_ctrl(int el0ae, int el1ae);
 
 #define A64FX_HWB_INIT_BST_MASK 0x1FFF
 #define A64FX_HWB_INIT_BST_SHIFT 32
+#define A64FX_HWB_INIT_LBSY_SHIFT 20
 int read_init_sync_bb(int bb, unsigned long *mask, unsigned long *bst);
 int write_init_sync_bb(int blade, unsigned long bst_mask);
 

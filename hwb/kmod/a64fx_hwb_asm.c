@@ -104,8 +104,10 @@ int write_init_sync_bb(int blade, unsigned long bst_mask)
             break;
 
     }
+    val &= (A64FX_HWB_INIT_BST_MASK << A64FX_HWB_INIT_BST_SHIFT);
+    val &= ~(1<<A64FX_HWB_INIT_LBSY_SHIFT)
+    val &= ~(A64FX_HWB_INIT_BST_MASK);
     val |= (bst_mask & A64FX_HWB_INIT_BST_MASK) << A64FX_HWB_INIT_BST_SHIFT;
-    val &= ~(0x1FFF & A64FX_HWB_INIT_BST_MASK);
     switch(blade)
     {
         case 0:
@@ -178,6 +180,7 @@ int write_assign_sync_wr(int window, int valid, int blade)
             asm volatile ("MRS %0, S3_0_C15_C15_3" : "=r" (val));
             break;
     }
+    val &= ~(A64FX_HWB_ASSIGN_BB_MASK);
     val |= (blade & A64FX_HWB_ASSIGN_BB_MASK);
     if (valid)
     {
@@ -263,11 +266,11 @@ int write_bst_sync_wr(int window, int sync)
     }
     if (sync)
     {
-        val |= 0x1 & A64FX_HWB_SYNC_WINDOW_MASK;
+        val |= A64FX_HWB_SYNC_WINDOW_MASK;
     }
     else
     {
-        val &= ~(0x1 & A64FX_HWB_SYNC_WINDOW_MASK);
+        val &= ~(A64FX_HWB_SYNC_WINDOW_MASK);
     }
     switch(window)
     {
