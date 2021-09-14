@@ -525,18 +525,22 @@ int oss_a64fx_hwb_free(struct a64fx_hwb_device *dev, int cmg_id, int blade)
     taskmap = get_taskmap(dev, current_task);
     if (taskmap)
     {
-        cmg = &dev->cmgs[cmg_id];
-        alloc = get_allocation(cmg, taskmap, blade);
-        if (!alloc)
+        // Only the task which allocated the barrier blade, can free it.
+        if (task_pid_nr(current_task) == task_pid_nr(taskmap->task))
         {
-            pr_err("Blade %d on CMG %d not allocated by task\n", blade, cmg_id);
-            goto free_exit;
-        }
-        free_allocation(cmg, taskmap, alloc);
-        if (refcount_read(&taskmap->num_allocs) == 0 && taskmap->num_allocs_safe == 0)
-        {
-            pr_info("Task has no more allocations, unregister it\n");
-            unregister_task(dev, taskmap);
+            cmg = &dev->cmgs[cmg_id];
+            alloc = get_allocation(cmg, taskmap, blade);
+            if (!alloc)
+            {
+                pr_err("Blade %d on CMG %d not allocated by task\n", blade, cmg_id);
+                goto free_exit;
+            }
+            free_allocation(cmg, taskmap, alloc);
+            if (refcount_read(&taskmap->num_allocs) == 0 && taskmap->num_allocs_safe == 0)
+            {
+                pr_info("Task has no more allocations, unregister it\n");
+                unregister_task(dev, taskmap);
+            }
         }
         err = 0;
     }
