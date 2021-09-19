@@ -83,7 +83,6 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
     int i = 0;
     int cpu = 0;
-    u64 val = 0;
     pr_info("Opening device\n");
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
 
@@ -115,7 +114,6 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
     int err = 0;
     int cpu = 0;
     int diable_hwb = 0;
-    u64 val = 0;
     struct task_struct* task = get_current();
     struct a64fx_task_mapping *taskmap = NULL;
     spin_lock(&oss_a64fx_hwb_device.dev_lock);

@@ -184,7 +184,8 @@ int write_assign_sync_wr(int window, int valid, int blade)
 /*    }*/
 /*    pr_info("write_assign_sync_wr: old 0x%llx\n", val);*/
 /*    val &= ~(A64FX_HWB_ASSIGN_BB_MASK);*/
-    val |= (blade & A64FX_HWB_ASSIGN_BB_MASK);
+    //val |= (blade & A64FX_HWB_ASSIGN_BB_MASK);
+    val |= (u8)blade;
     if (valid)
     {
         val |= (1ULL<<A64FX_HWB_ASSIGN_VALID_BIT);

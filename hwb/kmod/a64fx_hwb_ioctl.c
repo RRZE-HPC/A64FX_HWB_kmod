@@ -6,6 +6,8 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/cpumask.h>
+#include <linux/bitmap.h>
 #include <include/linux/smp.h>
 #include <include/linux/cpumask.h>
 
@@ -14,7 +16,7 @@
 #include "a64fx_hwb_asm.h"
 #include "fujitsu_hpc_ioctl.h"
 
-static int pemask_to_cpumask(size_t pemask_size, unsigned long *pemask, struct cpumask *cpumask)
+/*static int pemask_to_cpumask(size_t pemask_size, unsigned long *pemask, struct cpumask *cpumask)
 {
     int i = 0;
     int size = 0;
@@ -27,26 +29,26 @@ static int pemask_to_cpumask(size_t pemask_size, unsigned long *pemask, struct c
     size = (64 < pemask_size*sizeof(unsigned long) ? 64 : pemask_size*sizeof(unsigned long));
     for (i = 0; i < size; i++)
     {
-        if (*pemask & (1UL<<i))
+        if (test_bit(i, pemask))
         {
             cpumask_set_cpu(i, cpumask);
             count++;
         }
     }
     return count;
-}
+}*/
 
-static int check_cpumask(struct a64fx_hwb_device *dev, struct cpumask cpumask)
+static int check_cpumask(struct a64fx_hwb_device *dev, struct cpumask *cpumask)
 {
     int i = 0;
     int j = 0;
     int cpu = -1;
     int cmg = -1;
-    if (cpumask_weight(&cpumask) < 2)
+    if (cpumask_weight(cpumask) < 2)
     {
         return -EINVAL;
     }
-    for_each_cpu(cpu, &cpumask)
+    for_each_cpu(cpu, cpumask)
     {
         if (!cpu_online(cpu)) return -1;
         for (i = 0; i < dev->num_cmgs; i++)
@@ -70,22 +72,24 @@ static int check_cpumask(struct a64fx_hwb_device *dev, struct cpumask cpumask)
     return cmg;
 }
 
-static int cpumask_to_ppemask(struct a64fx_cmg_device* cmg, struct cpumask cpumask, unsigned long* ppemask)
+static int cpumask_to_ppemask(struct a64fx_cmg_device* cmg, struct cpumask *cpumask, unsigned long* ppemask)
 {
     int cpu = 0;
     int i = 0;
     unsigned long mask = 0x0UL;
-    if ((!cmg) || (!ppemask))
+    if ((!cmg) || (!ppemask) || (!cpumask))
     {
         return -EINVAL;
     }
-    for_each_cpu(cpu, &cpumask)
+    for_each_cpu(cpu, cpumask)
     {
         for (i = 0; i < cmg->num_pes; i++)
         {
             if (cmg->pe_map[i].cpu_id == cpu)
             {
-                mask |= (1UL<<cmg->pe_map[i].ppe_id);
+		pr_info("CPU %d -> CMG %d PPE %d\n", cpu, cmg->cmg_id, cmg->pe_map[i].ppe_id);
+		set_bit(cmg->pe_map[i].ppe_id, &mask);
+                //mask |= (1UL<<cmg->pe_map[i].ppe_id);
             }
         }
     }
@@ -153,8 +157,9 @@ static struct a64fx_task_allocation * get_allocation(struct a64fx_cmg_device *cm
     return NULL;
 }
 
-static struct a64fx_task_allocation * new_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mapping *taskmap, int blade)
+static struct a64fx_task_allocation * new_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mapping *taskmap, int blade, struct cpumask *cpumask)
 {
+    int i = 0;
     struct a64fx_task_allocation *alloc = NULL;
     struct hwb_allocate_info info = {0, 0UL};
     alloc = get_allocation(cmg, taskmap, blade);
@@ -171,16 +176,18 @@ static struct a64fx_task_allocation * new_allocation(struct a64fx_cmg_device *cm
     pr_info("New allocation for CMG %d and Blade %d\n", cmg->cmg_id, blade);
     alloc->cmg = (u8)cmg->cmg_id;
     alloc->blade = (u8)blade;
-    alloc->win_mask = 0x0;
-    alloc->window = A64FX_HWB_UNASSIGNED_WIN;
+/*    alloc->win_mask = 0x0;*/
+    for (i = 0; i < MAX_PE_PER_CMG; i++)
+        alloc->window[i] = A64FX_HWB_UNASSIGNED_WIN;
     alloc->task = taskmap->task;
     INIT_LIST_HEAD(&alloc->list);
     refcount_set(&alloc->assign_count, 0);
     alloc->assign_count_safe = 0;
     cpumask_clear(&alloc->assign_mask);
+    cpumask_copy(&alloc->cpumask, cpumask);
     info.blade = blade;
     info.cmg = cmg->cmg_id;
-    cpumask_to_ppemask(cmg, taskmap->cpumask, &info.ppemask);
+    cpumask_to_ppemask(cmg, &alloc->cpumask, &info.ppemask);
     pr_info("PPEmask is 0x%lx\n", info.ppemask);
     smp_call_function_any(&cmg->cmgmask, oss_a64fx_hwb_allocate_func, &info, 1);
     pr_info("Set blade %d in CMG %d active\n", info.blade, info.cmg);
@@ -193,13 +200,13 @@ static struct a64fx_task_allocation * new_allocation(struct a64fx_cmg_device *cm
     return 0;
 }
 
-static struct a64fx_task_allocation * register_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mapping *taskmap, int blade)
+static struct a64fx_task_allocation * register_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mapping *taskmap, int blade, struct cpumask *cpumask)
 {
     struct a64fx_task_allocation *alloc = NULL;
     alloc = get_allocation(cmg, taskmap, blade);
     if (!alloc)
     {
-        alloc = new_allocation(cmg, taskmap, blade);
+        alloc = new_allocation(cmg, taskmap, blade, cpumask);
     }
     return alloc;
 }
@@ -220,7 +227,6 @@ static int free_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mappi
             {
                 struct hwb_assign_info info = {
                     .cpu = cpu,
-                    .window = alloc->window,
                     .cmg = alloc->cmg,
                     .blade = 0,
                     .valid = 0,
@@ -233,18 +239,22 @@ static int free_allocation(struct a64fx_cmg_device *cmg, struct a64fx_task_mappi
                         break;
                     }
                 }
-                pr_info("Clear window %d on CPU %d\n", alloc->window, cpu);
-                smp_call_function_single(pemap->cpu_id, oss_a64fx_hwb_assign_func, &info, 1);
-/*                write_assign_sync_wr(alloc->window, 0, 0);*/
-                cpumask_clear_cpu(cpu, &alloc->assign_mask);
-                clear_bit(alloc->window, &pemap->bw_map);
-                alloc->assign_count_safe--;
-                if (alloc->assign_count_safe == 0)
+                info.window = alloc->window[pemap->ppe_id];
+                if (alloc->window[pemap->ppe_id] >= 0 && alloc->window[pemap->ppe_id] < MAX_BW_PER_CMG)
                 {
-                    alloc->window = A64FX_HWB_UNASSIGNED_WIN;
-                    alloc->win_mask = 0x0;
+                    pr_info("Clear window %d on CPU %d\n", alloc->window[pemap->ppe_id], cpu);
+                    smp_call_function_single(pemap->cpu_id, oss_a64fx_hwb_assign_func, &info, 1);
+    /*                write_assign_sync_wr(alloc->window, 0, 0);*/
+                    cpumask_clear_cpu(cpu, &alloc->assign_mask);
+                    clear_bit(alloc->window[pemap->ppe_id], &pemap->bw_map);
+                    alloc->window[pemap->ppe_id] = A64FX_HWB_UNASSIGNED_WIN;
+                    alloc->assign_count_safe--;
+/*                    if (alloc->assign_count_safe == 0)*/
+/*                    {*/
+/*                        */
+/*                        alloc->win_mask = 0x0;*/
+/*                    }*/
                 }
-                put_cpu();
             }
         }
         pr_info("PID %d free BB %d at CMG %d\n", task_pid_nr(taskmap->task), alloc->blade, alloc->cmg);
@@ -281,8 +291,9 @@ struct a64fx_task_mapping * get_taskmap(struct a64fx_hwb_device *dev, struct tas
     return NULL;
 }
 
-static struct a64fx_task_mapping * new_taskmap(struct a64fx_hwb_device *dev, struct task_struct* task, struct cpumask cpumask)
+static struct a64fx_task_mapping * new_taskmap(struct a64fx_hwb_device *dev, struct task_struct* task, struct cpumask *cpumask)
 {
+    int cpu;
     struct a64fx_task_mapping *taskmap = NULL;
     taskmap = get_taskmap(dev, task);
     if (taskmap)
@@ -299,7 +310,11 @@ static struct a64fx_task_mapping * new_taskmap(struct a64fx_hwb_device *dev, str
     taskmap->task = task;
     refcount_set(&taskmap->num_allocs, 0);
     taskmap->num_allocs_safe = 0;
-    cpumask_copy(&taskmap->cpumask, &cpumask);
+    cpumask_copy(&taskmap->cpumask, cpumask);
+    for_each_cpu(cpu, &taskmap->cpumask)
+    {
+        pr_info("New CPU %d\n", cpu);
+    }
     INIT_LIST_HEAD(&taskmap->list);
     INIT_LIST_HEAD(&taskmap->allocs);
     list_add(&taskmap->list, &dev->task_list);
@@ -410,7 +425,7 @@ int oss_a64fx_hwb_get_peinfo_ioctl(unsigned long arg)
 
 
 
-int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, int cmg, struct cpumask cpumask, int *blade)
+int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, int cmg, struct cpumask *cpumask, int *blade)
 {
     int err = 0;
     int bit = 0;
@@ -443,7 +458,7 @@ int oss_a64fx_hwb_allocate(struct a64fx_hwb_device *dev, int cmg, struct cpumask
     pr_info("Blade %d is free, use it\n", bit);
     if (bit >= 0 && bit < dev->num_bb_per_cmg)
     {
-        register_allocation(cmgdev, taskmap, bit);
+        register_allocation(cmgdev, taskmap, bit, cpumask);
         *blade = bit;
         err = 0;
     }
@@ -461,7 +476,8 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
     int cmg_id = 0;
     int bb_id = 0;
     unsigned long mask = 0;
-    struct cpumask cpumask;
+    int cpu;
+    struct cpumask *cpumask;
     struct fujitsu_hwb_ioc_bb_ctl ioc_bb_ctl = {0};
     struct fujitsu_hwb_ioc_bb_ctl __user *uarg = (struct fujitsu_hwb_ioc_bb_ctl __user *)arg;
     
@@ -472,19 +488,19 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
         return -EINVAL;
     }
     pr_info("Start allocate (pemask)\n");
+    //err = bitmap_parse_user((unsigned char __user *)ioc_bb_ctl.pemask, ioc_bb_ctl.size, &mask, MAX_NUM_CMG*MAX_PE_PER_CMG);
+    //if (bitmap_parse_user((unsigned char __user *)ioc_bb_ctl.pemask, ioc_bb_ctl.size, &mask, MAX_NUM_CMG*MAX_PE_PER_CMG))
     if (copy_from_user(&mask, (unsigned long __user *)ioc_bb_ctl.pemask, sizeof(unsigned long __user)))
     {
-        pr_err("Error to get bb_ctl pemask data\n");
+        pr_err("Error to get bb_ctl pemask data, %d\n", err);
         return -EINVAL;
     }
     pr_info("Read pemask 0x%lX\n", mask);
-    
-    err = pemask_to_cpumask(ioc_bb_ctl.size, &mask, &cpumask);
-    if (err == 0)
-    {
-        pr_err("cpumask empty\n");
-        return -EINVAL;
-    }
+    cpumask = to_cpumask(&mask);
+    for_each_cpu(cpu, cpumask)
+	   {
+		   pr_info("CPU %d\n", cpu);
+	   } 
     err = check_cpumask(dev, cpumask);
     if (err < 0)
     {
@@ -541,8 +557,13 @@ int oss_a64fx_hwb_free(struct a64fx_hwb_device *dev, int cmg_id, int blade)
                 pr_info("Task has no more allocations, unregister it\n");
                 unregister_task(dev, taskmap);
             }
+            err = 0;
         }
-        err = 0;
+        else
+        {
+            pr_info("Child task cannot free barrier allocated by parent\n");
+            err = -EINVAL;
+        }
     }
 free_exit:
     spin_unlock(&dev->dev_lock);
@@ -582,7 +603,6 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
     int err = 0;
     int cpuid = 0;
     u8 cmg = 0, ppe = 0;
-    int valid = 0, bb = 0;
     struct task_struct* current_task = get_current();
     struct a64fx_task_mapping* taskmap = NULL;
     struct a64fx_task_allocation* alloc = NULL;
@@ -612,15 +632,15 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
             err = -ENODEV;
             if (window < 0)
             {
-                if (alloc->window == A64FX_HWB_UNASSIGNED_WIN)
+                if (alloc->window[pe->ppe_id] == A64FX_HWB_UNASSIGNED_WIN)
                 {
                     window = find_first_zero_bit(&pe->bw_map, MAX_BW_PER_CMG);
                     pr_info("Get next free window %d", window);
                 }
-                else
+                else if (test_bit(alloc->window[pe->ppe_id], &pe->bw_map))
                 {
-                    window = alloc->window;
-                    pr_info("Reuse window %d", window);
+                    window = alloc->window[pe->ppe_id];
+                    pr_info("Reuse window %d used by other pe", window);
                 }
             }
             else
@@ -630,43 +650,35 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
             
             if (window >= 0 && window < MAX_BW_PER_CMG && (!test_bit(window, &pe->bw_map)))
             {
-                read_assign_sync_wr(window, &valid, &bb);
-                if (valid)
-                {
-                    pr_err("Error in bookkeeping, window %d is assigned to blade %d\n", window, bb);
-                }
-                else
-                {
-                    //cmgdev->bb_map[blade] |= (1<<window);
+                //cmgdev->bb_map[blade] |= (1<<window);
 /*                    pr_info("Use window %d for CMG %d and Blade %d\n", window, cmg_id, blade);*/
 /*                    set_bit(window, &cmgdev->bw_active);*/
 /*                    pr_info("Map window %d on CMG %d to Blade %d\n", window, cmg_id, blade);*/
 /*                    cmgdev->bw_map[window] = blade;*/
-                    struct hwb_assign_info info = {
-                        .cpu = pe->cpu_id,
-                        .window = window,
-                        .cmg = cmg_id,
-                        .blade = blade,
-                        .valid = 1
-                    };
-                    pr_info("Write window %d assign (CPU %d/%d CMG %d Blade %d)\n", window, pe->cpu_id, cpuid, cmg_id, blade);
-                    smp_call_function_single(pe->cpu_id, oss_a64fx_hwb_assign_func, &info, 1);
+                struct hwb_assign_info info = {
+                    .cpu = pe->cpu_id,
+                    .window = window,
+                    .cmg = cmg_id,
+                    .blade = blade,
+                    .valid = 1
+                };
+                pr_info("Write window %d assign (CPU %d/%d CMG %d Blade %d)\n", window, pe->cpu_id, cpuid, cmg_id, blade);
+                smp_call_function_single(pe->cpu_id, oss_a64fx_hwb_assign_func, &info, 1);
 /*                    write_assign_sync_wr(window, 1, blade);*/
-                    if (alloc->window == A64FX_HWB_UNASSIGNED_WIN)
-                    {
-                        pr_info("Store window %d on CMG %d to Blade %d in allocation\n", window, cmg_id, blade);
-                        set_bit(window, &alloc->win_mask);
-                        alloc->window = window;
-                    }
-                    pr_info("Set window %d for CPU %d/%d\n", window, pe->cpu_id, cpuid);
-                    set_bit(window, &pe->bw_map);
-                    cpumask_set_cpu(pe->cpu_id, &alloc->assign_mask);
-                    refcount_inc(&alloc->assign_count);
-                    alloc->assign_count_safe++;
-                    pr_info("%d/%d Threads assigned to allocation (TGID %d CMG %d Blade %d)\n", refcount_read(&alloc->assign_count), alloc->assign_count_safe, task_tgid_nr(taskmap->task), cmg_id, blade);
-                    *outwindow = window;
-                    err = 0;
-                }
+                //if (alloc->window[pe->ppe_id] == A64FX_HWB_UNASSIGNED_WIN)
+                //{
+                    pr_info("Store window %d for CPU %d on CMG %d to Blade %d in allocation\n", window, pe->cpu_id, cmg_id, blade);
+/*                    set_bit(window, &alloc->win_mask);*/
+                    alloc->window[pe->ppe_id] = window;
+                //}
+                pr_info("Set window %d for CPU %d/%d\n", window, pe->cpu_id, cpuid);
+                set_bit(window, &pe->bw_map);
+                cpumask_set_cpu(pe->cpu_id, &alloc->assign_mask);
+                refcount_inc(&alloc->assign_count);
+                alloc->assign_count_safe++;
+                pr_info("%d/%d Threads assigned to allocation (TGID %d CMG %d Blade %d)\n", refcount_read(&alloc->assign_count), alloc->assign_count_safe, task_tgid_nr(taskmap->task), cmg_id, blade);
+                *outwindow = window;
+                err = 0;
             }
             else
             {
@@ -751,7 +763,8 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
         if (alloc)
         {
             struct a64fx_cmg_device* cmgdev = &dev->cmgs[cmg_id];
-            if (alloc->window == window)
+            window = alloc->window[pe->ppe_id];
+            if (window >= 0 && window < MAX_BW_PER_CMG)
             {
                 spin_lock(&cmgdev->cmg_lock);
                 if (test_bit(window, &pe->bw_map))
@@ -771,17 +784,23 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
                         pr_info("Clear window %d assign (CPU %d/%d CMG %d Blade %d)\n", window, pe->cpu_id, cpuid, cmg_id, blade);
                         smp_call_function_single(pe->cpu_id, oss_a64fx_hwb_assign_func, &info, 1);
 /*                        write_assign_sync_wr(window, 0, 0);*/
+                        pr_info("Remove mapping window %d on CMG %d to Blade %d\n", window, cmg_id, blade);
+                        alloc->window[pe->ppe_id] = A64FX_HWB_UNASSIGNED_WIN;
+                        pr_info("Clear window %d for CPU %d/%d\n", window, pe->cpu_id, cpuid);
+                        clear_bit(window, &pe->bw_map);
+                        cpumask_clear_cpu(pe->cpu_id, &alloc->assign_mask);
+                        refcount_dec(&alloc->assign_count);
                         alloc->assign_count_safe--;
-                        if (refcount_dec_and_test(&alloc->assign_count))
-                        {
-                            pr_info("Remove mapping window %d on CMG %d to Blade %d\n", window, cmg_id, blade);
-                            alloc->window = A64FX_HWB_UNASSIGNED_WIN;
-                            clear_bit(window, &alloc->win_mask);
-                            pr_info("Clear window %d for CPU %d/%d\n", window, pe->cpu_id, cpuid);
-                            clear_bit(window, &pe->bw_map);
-                            cpumask_clear_cpu(pe->cpu_id, &alloc->assign_mask);
+/*                        if (refcount_dec_and_test(&alloc->assign_count))*/
+/*                        {*/
+                            
+                            
+/*                            clear_bit(window, &alloc->win_mask);*/
+                            
+                            
+                            
 /*                            cmgdev->bw_map[window] = 0;*/
-                        }
+/*                        }*/
                         err = 0;
                         pr_info("%d/%d Threads assigned to allocation (TGID %d CMG %d Blade %d)\n", refcount_read(&alloc->assign_count), alloc->assign_count_safe, task_tgid_nr(taskmap->task), cmg_id, blade);
                     }
@@ -795,7 +814,7 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
             }
             else
             {
-                pr_err("AAAH! Window %d in allocation does not fit user given %d\n", alloc->window, window);
+                pr_err("AAAH! Window %d in allocation does not fit user given %d\n", alloc->window[pe->ppe_id], window);
             }
         }
         else
@@ -880,7 +899,7 @@ int oss_a64fx_hwb_reset_ioctl(struct a64fx_hwb_device *dev, unsigned long arg)
         list_for_each_safe(alloccur, alloctmp, &taskmap->allocs)
         {
             alloc = list_entry(alloccur, struct a64fx_task_allocation, list);
-            pr_info("Delete allocation (PID %d CMG %d Blade %d Window %d)\n", alloc->task->pid, alloc->cmg, alloc->blade, alloc->window);
+            pr_info("Delete allocation (PID %d CMG %d Blade %d)\n", alloc->task->pid, alloc->cmg, alloc->blade);
             list_del(&alloc->list);
             refcount_dec(&taskmap->num_allocs);
             kfree(alloc);
