@@ -20,7 +20,7 @@ int read_init_sync_bb(int bb, unsigned long *mask, unsigned long *bst);
 int write_init_sync_bb(int blade, unsigned long bst_mask);
 
 
-#define A64FX_HWB_ASSIGN_BB_MASK 0x3UL
+#define A64FX_HWB_ASSIGN_BB_MASK 0x7UL
 #define A64FX_HWB_ASSIGN_VALID_BIT 63
 int read_assign_sync_wr(int window, int* valid, int *blade);
 int write_assign_sync_wr(int window, int valid, int blade);
