@@ -63,8 +63,11 @@ Each CMG (core-memory-group) contains 4 barrier blade and 6 barrier window regis
   - [x] Create global read-only entry `/sys/class/misc/fujitsu_hwb/hwinfo`
   - [x] Create subfolders per CMG with various read-only entries below `/sys/class/misc/fujitsu_hwb/CMG[0-3]/`
 - [x] Create IOCTL call `FUJITSU_HWB_IOC_GET_PE_INFO` to retrieve the physical location of a hardware thread
-- [ ] Create IOCTL call `FUJITSU_HWB_IOC_BB_ALLOC` to allocate a barrier blade in a CMG
-- [ ] Create IOCTL call `FUJITSU_HWB_IOC_BB_FREE` to free a barrier blade in a CMG
-- [ ] Create IOCTL call `FUJITSU_HWB_IOC_BW_ASSIGN` to assign a barrier window to a barrier blade in a CMG
-- [ ] Create IOCTL call `FUJITSU_HWB_IOC_BW_UNASSIGN` to release a barrier window from a barrier blade in a CMG
+- [x] Create IOCTL call `FUJITSU_HWB_IOC_BB_ALLOC` to allocate a barrier blade in a CMG
+- [x] Create IOCTL call `FUJITSU_HWB_IOC_BB_FREE` to free a barrier blade in a CMG
+- [x] Create IOCTL call `FUJITSU_HWB_IOC_BW_ASSIGN` to assign a barrier window to a barrier blade in a CMG
+- [x] Create IOCTL call `FUJITSU_HWB_IOC_BW_UNASSIGN` to release a barrier window from a barrier blade in a CMG
+- [x] Ensure all tests shipped with the user-space library work
+
+**DONE!**
 
