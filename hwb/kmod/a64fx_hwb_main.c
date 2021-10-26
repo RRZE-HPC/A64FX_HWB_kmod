@@ -123,7 +123,7 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
         oss_a64fx_hwb_device.active_count_safe--;
         diable_hwb = refcount_dec_and_test(&oss_a64fx_hwb_device.active_count);
         taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
-        if (taskmap)
+        if (taskmap && task_pid_nr(task) == task_pid_nr(taskmap->task))
         {
             err = unregister_task(&oss_a64fx_hwb_device, taskmap);
             if (err)
