@@ -60,11 +60,9 @@ static struct a64fx_hwb_device oss_a64fx_hwb_device = {
         .mode = 0666,
     },
     .task_list = LIST_HEAD_INIT(oss_a64fx_hwb_device.task_list),
-    .num_tasks = REFCOUNT_INIT(0),
-    .num_tasks_safe = 0,
+    .num_tasks = 0,
     .num_cmgs = 0,
-    .active_count = REFCOUNT_INIT(0),
-    .active_count_safe = 0,
+    .active_count = 0,
 };
 
 struct hwb_ctrl_info {
@@ -83,27 +81,26 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
     int i = 0;
     int cpu = 0;
-    pr_info("Opening device\n");
+    pr_debug("Opening device\n");
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
 
-    if (oss_a64fx_hwb_device.active_count_safe == 0)
+    if (oss_a64fx_hwb_device.active_count == 0)
     {
 #ifdef __ARM_ARCH_8A
         struct hwb_ctrl_info info = {1, 1};
         for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
         {
-            pr_info("Allowing HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
+            pr_debug("Allowing HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
             for_each_cpu(cpu, &oss_a64fx_hwb_device.cmgs[i].cmgmask)
             {
                 smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
-/*                pr_info("Allowing HWB access at CMG%d CPU%d: EL0 %d EL1 %d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id, cpu, info.el0ae, info.el1ae);*/
+/*                pr_debug("Allowing HWB access at CMG%d CPU%d: EL0 %d EL1 %d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id, cpu, info.el0ae, info.el1ae);*/
             }
         }
 #endif
     }
-    refcount_inc(&oss_a64fx_hwb_device.active_count);
-    oss_a64fx_hwb_device.active_count_safe++;
-    pr_info("Active Tasks %d/%d\n", refcount_read(&oss_a64fx_hwb_device.active_count), oss_a64fx_hwb_device.active_count_safe);
+    oss_a64fx_hwb_device.active_count++;
+    pr_debug("Active Tasks %d\n", oss_a64fx_hwb_device.active_count);
     spin_unlock(&oss_a64fx_hwb_device.dev_lock);
     return 0;
 }
@@ -113,36 +110,33 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
     int i = 0;
     int err = 0;
     int cpu = 0;
-    int diable_hwb = 0;
     struct task_struct* task = get_current();
     struct a64fx_task_mapping *taskmap = NULL;
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
-    pr_info("Closing device (Active %d)\n", oss_a64fx_hwb_device.active_count_safe);
-    if (oss_a64fx_hwb_device.active_count_safe > 0)
+    pr_debug("Closing device (Active %d)\n", oss_a64fx_hwb_device.active_count);
+    if (oss_a64fx_hwb_device.active_count > 0)
     {
-        oss_a64fx_hwb_device.active_count_safe--;
-        diable_hwb = refcount_dec_and_test(&oss_a64fx_hwb_device.active_count);
+        oss_a64fx_hwb_device.active_count--;
         taskmap = get_taskmap(&oss_a64fx_hwb_device, task);
         if (taskmap && task_pid_nr(task) == task_pid_nr(taskmap->task))
         {
             err = unregister_task(&oss_a64fx_hwb_device, taskmap);
             if (err)
             {
-                pr_info("Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
+                pr_debug("Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
             }
         }
 
-        if (oss_a64fx_hwb_device.active_count_safe == 0)
+        if (oss_a64fx_hwb_device.active_count == 0)
         {
 #ifdef __ARM_ARCH_8A
             struct hwb_ctrl_info info = {0, 0};
             for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
             {
-                pr_info("Disable HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
+                pr_debug("Disable HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
                 for_each_cpu(cpu, &oss_a64fx_hwb_device.cmgs[i].cmgmask)
                 {
                     smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
-/*                    pr_info("Disable HWB access at CMG%d CPU%d: EL0 %d EL1 %d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id, cpu, info.el0ae, info.el1ae);*/
                 }
             }
 #endif
@@ -152,7 +146,7 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
     {
         pr_err("Close on not opened device\n");
     }
-    pr_info("Active Tasks %d/%d\n", refcount_read(&oss_a64fx_hwb_device.active_count), oss_a64fx_hwb_device.active_count_safe);
+    pr_debug("Active Tasks %d\n", oss_a64fx_hwb_device.active_count);
     spin_unlock(&oss_a64fx_hwb_device.dev_lock);
     return 0;
 }
@@ -163,27 +157,27 @@ static long oss_a64fx_hwb_ioctl(struct file *file, unsigned int ioc, unsigned lo
     
     switch (ioc) {
         case FUJITSU_HWB_IOC_GET_PE_INFO:
-/*            pr_info("FUJITSU_HWB_IOC_GET_PE_INFO...\n");*/
+/*            pr_debug("FUJITSU_HWB_IOC_GET_PE_INFO...\n");*/
             err = oss_a64fx_hwb_get_peinfo_ioctl(arg);
             break;
         case FUJITSU_HWB_IOC_BW_ASSIGN:
-            pr_info("FUJITSU_HWB_IOC_BW_ASSIGN...\n");
+            pr_debug("FUJITSU_HWB_IOC_BW_ASSIGN...\n");
             err = oss_a64fx_hwb_assign_blade_ioctl(&oss_a64fx_hwb_device, arg);
             break;
         case FUJITSU_HWB_IOC_BW_UNASSIGN:
-            pr_info("FUJITSU_HWB_IOC_BW_UNASSIGN...\n");
+            pr_debug("FUJITSU_HWB_IOC_BW_UNASSIGN...\n");
             err = oss_a64fx_hwb_unassign_blade_ioctl(&oss_a64fx_hwb_device, arg);
             break;
         case FUJITSU_HWB_IOC_BB_ALLOC:
-            pr_info("FUJITSU_HWB_IOC_BB_ALLOC...\n");
+            pr_debug("FUJITSU_HWB_IOC_BB_ALLOC...\n");
             err = oss_a64fx_hwb_allocate_ioctl(&oss_a64fx_hwb_device, arg);
             break;
         case FUJITSU_HWB_IOC_BB_FREE:
-            pr_info("FUJITSU_HWB_IOC_BB_FREE...\n");
+            pr_debug("FUJITSU_HWB_IOC_BB_FREE...\n");
             err = oss_a64fx_hwb_free_ioctl(&oss_a64fx_hwb_device, arg);
             break;
         case FUJITSU_HWB_IOC_RESET:
-            pr_info("FUJITSU_HWB_IOC_RESET...\n");
+            pr_debug("FUJITSU_HWB_IOC_RESET...\n");
             err = oss_a64fx_hwb_reset_ioctl(&oss_a64fx_hwb_device, arg);
         default:
             err = -ENOTTY;
@@ -204,7 +198,7 @@ void fill_pe_map(void *info)
     dev->cmgs[cmg].pe_map[ppe].cpu_id = cpuid;
     dev->cmgs[cmg].pe_map[ppe].cmg_id = cmg;
     dev->cmgs[cmg].pe_map[ppe].ppe_id = ppe;
-    pr_info("CPU %d CMG %d PPE %d\n", cpuid, cmg, ppe);
+    pr_debug("CPU %d CMG %d PPE %d\n", cpuid, cmg, ppe);
     dev->cmgs[cmg].pe_map[ppe].bw_map = 0x0;
 }
 
@@ -224,7 +218,7 @@ static int get_max_pe_per_cmg(struct a64fx_hwb_device* dev)
                 tmpcount++;
             }
         }
-        pr_info("CMG %d has %d PEs\n", i, tmpcount);
+        pr_debug("CMG %d has %d PEs\n", i, tmpcount);
         dev->cmgs[i].num_pes = tmpcount;
         if (tmpcount > maxcount)
         {
@@ -240,7 +234,7 @@ static int __init oss_a64fx_hwb_init(void)
     int i = 0;
     int j = 0;
     struct device *dev = NULL;
-    pr_info("initializing...\n");
+    pr_debug("initializing...\n");
 
     // Create misc device fujitsu_hwb
     err = misc_register(&oss_a64fx_hwb_device.misc);
@@ -282,7 +276,7 @@ static int __init oss_a64fx_hwb_init(void)
         }
     }
 
-    pr_info("init done\n");
+    pr_debug("init done\n");
     return err;
 remove_global_sysfs:
     device_remove_file(dev, &dev_attr_hwinfo);
@@ -295,7 +289,7 @@ static void __exit oss_a64fx_hwb_exit(void)
 {
     int i = 0;
     struct device *dev = NULL;
-    pr_info("exiting...\n");
+    pr_debug("exiting...\n");
     // Iterate over CMGs and destroy data structures and CMG
     // related sysfs files
     for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
@@ -307,13 +301,13 @@ static void __exit oss_a64fx_hwb_exit(void)
     device_remove_file(dev, &dev_attr_hwinfo);
     // Remove misc device fujitsu_hwb
     misc_deregister(&oss_a64fx_hwb_device.misc);
-    pr_info("exit done\n");
+    pr_debug("exit done\n");
 }
 
 MODULE_DESCRIPTION("Module for A64fx hardware barrier");
 MODULE_AUTHOR("Thomas Gruber <thomas.gruber@fau.de>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1");
+MODULE_VERSION("0.2");
 
 module_init(oss_a64fx_hwb_init);
 module_exit(oss_a64fx_hwb_exit);

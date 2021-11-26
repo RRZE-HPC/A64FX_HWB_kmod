@@ -11,6 +11,17 @@
 #include "a64fx_hwb_asm.h"
 #include "a64fx_hwb_ioctl.h"
 
+
+/*
+ * This file contains basically all CMG-specific sysfs entries. The main device provides
+ * only the hwinfo sysfs entry but for CMGs you can get the current state of allocated
+ * barrier blades and windows through sysfs. Each CMG is represented by an own kobject to
+ * use the common sysfs handlers while still being able to access the driver's CMG structures.
+ *
+ * While some functions use information from the driver's structures others are directly
+ * read from the hardware registers.
+ */
+
 static inline struct a64fx_cmg_device *kobj_to_cmg(struct kobject *kobj)
 {
     return container_of(kobj, struct a64fx_cmg_device, kobj);
@@ -150,7 +161,7 @@ int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* par
     int ret = 0;
     struct kobject* kobj = NULL;
     
-    pr_info("init CMG%d\n", cmg_id);
+    pr_debug("init CMG%d\n", cmg_id);
     dev->bb_active = 0x0U;
     dev->cmg_id = cmg_id;
     spin_lock_init(&dev->cmg_lock);
@@ -158,12 +169,13 @@ int initialize_cmg(int cmg_id, struct a64fx_cmg_device* dev, struct kobject* par
 
     if (!kobjtype)
     {
-        pr_info("create Test kobj to get default kobjtype\n");
+        // This is a workaround to get the default kobjtype structure
+        pr_debug("create Test kobj to get default kobjtype\n");
         kobj = kobject_create_and_add("Test", parent);
         kobjtype = get_ktype(kobj);
         kobject_put(kobj);
     }
-    pr_info("create CMG kobj\n");
+    pr_debug("create CMG kobj\n");
     kobject_init(&dev->kobj, kobjtype);
     ret = kobject_add(&dev->kobj, parent, "CMG%d", cmg_id);
     if(ret){
@@ -183,7 +195,7 @@ void destroy_cmg(struct a64fx_cmg_device* dev)
 {
     if (dev)
     {
-        pr_info("destroy CMG%d\n", dev->cmg_id);
+        pr_debug("destroy CMG%d\n", dev->cmg_id);
         sysfs_remove_group(&dev->kobj, &cmg_group_attrs);
         kobject_put(&dev->kobj);
     }

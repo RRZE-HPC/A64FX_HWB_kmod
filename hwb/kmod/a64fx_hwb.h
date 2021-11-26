@@ -1,7 +1,6 @@
 #ifndef A64FX_HWB_H
 #define A64FX_HWB_H
 
-#include <linux/refcount.h>
 #include <linux/kobject.h>
 #include <linux/miscdevice.h>
 
@@ -20,8 +19,6 @@ struct a64fx_core_mapping {
     int cpu_id;
     int cmg_id;
     int ppe_id;
-    int pe_id;
-    int cmg_offset;
     unsigned long bw_map;
     int win_blades[MAX_BW_PER_CMG];
 };
@@ -44,23 +41,22 @@ struct a64fx_task_allocation {
     u8 cmg;
     long unsigned int win_mask;
     int window[MAX_PE_PER_CMG];
-    int assign_count_safe;
+    int assign_count;
     struct cpumask assign_mask;
     struct cpumask cpumask;
-    refcount_t assign_count;
     struct task_struct* task;
     struct list_head list;
 };
 
 struct a64fx_task_mapping {
+    // Allocating task
     struct task_struct* task;
-    refcount_t refcount;
-    struct cpumask cpumask;
+    // Anchor for the struct inside the device->task_list
     struct list_head list;
+    // Head of the allocation list
     struct list_head allocs;
-    //struct a64fx_task_allocation allocations[MAX_NUM_CMG*MAX_BB_PER_CMG];
-    refcount_t num_allocs;
-    int num_allocs_safe;
+    // Number of allocations for the task
+    int num_allocs;
 };
 
 struct a64fx_hwb_device {
@@ -71,10 +67,8 @@ struct a64fx_hwb_device {
     struct a64fx_cmg_device cmgs[MAX_NUM_CMG];
     struct miscdevice misc;
     spinlock_t dev_lock;
-    refcount_t active_count;
-    int active_count_safe;
-    refcount_t num_tasks;
-    int num_tasks_safe;
+    int active_count;
+    int num_tasks;
     struct list_head task_list;
 };
 
