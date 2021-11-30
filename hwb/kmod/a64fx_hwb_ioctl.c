@@ -1,4 +1,5 @@
 #define pr_fmt(fmt) "%s:%s: " fmt, KBUILD_MODNAME, __func__
+#include <linux/version.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -654,7 +655,12 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
     struct task_struct* current_task = get_current();
     struct a64fx_task_mapping* taskmap = NULL;
     struct a64fx_task_allocation* alloc = NULL;
-    if (cpumask_weight(&current_task->cpus_allowed) > 1)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,3,0)
+    cpumask_t* task_cpus = &current_task->cpus_allowed;
+#else
+    cpumask_t* task_cpus = &current_task->cpus_mask;
+#endif
+    if (cpumask_weight(task_cpus) > 1)
     {
         pr_debug("Task in assign not pinned\n");
         return -EINVAL;
@@ -797,7 +803,12 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
     struct task_struct* current_task = get_current();
     struct a64fx_task_mapping* taskmap = NULL;
     struct a64fx_task_allocation* alloc = NULL;
-    if (cpumask_weight(&current_task->cpus_allowed) > 1)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,3,0)
+    cpumask_t* task_cpus = &current_task->cpus_allowed;
+#else
+    cpumask_t* task_cpus = &current_task->cpus_mask;
+#endif
+    if (cpumask_weight(task_cpus) > 1)
     {
         pr_debug("Task in unassign not pinned\n");
         return -EINVAL;

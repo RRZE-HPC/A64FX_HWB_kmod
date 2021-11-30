@@ -1,4 +1,5 @@
 #define pr_fmt(fmt) "%s:%s: " fmt, KBUILD_MODNAME, __func__
+#include <linux/version.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -79,22 +80,9 @@ static void oss_a64fx_hwb_ctrl_func(void* info)
 
 static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 {
-    int i = 0;
-    int cpu = 0;
     pr_debug("Opening device\n");
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
 
-/*    if (oss_a64fx_hwb_device.active_count == 0)*/
-/*    {*/
-/*#ifdef __ARM_ARCH_8A*/
-/*        struct hwb_ctrl_info info = {1, 1};*/
-/*        for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)*/
-/*        {*/
-/*            pr_debug("Allowing HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);*/
-/*            smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);*/
-/*        }*/
-/*#endif*/
-/*    }*/
     oss_a64fx_hwb_device.active_count++;
     pr_debug("Active Tasks %d\n", oss_a64fx_hwb_device.active_count);
     spin_unlock(&oss_a64fx_hwb_device.dev_lock);
@@ -103,9 +91,7 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
 
 static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
 {
-    int i = 0;
     int err = 0;
-    int cpu = 0;
     struct task_struct* task = get_current();
     struct a64fx_task_mapping *taskmap = NULL;
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
@@ -122,18 +108,6 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
                 pr_debug("Failed close for task %d (TGID %d)\n", task->pid, task->tgid);
             }
         }
-
-/*        if (oss_a64fx_hwb_device.active_count == 0)*/
-/*        {*/
-/*#ifdef __ARM_ARCH_8A*/
-/*            struct hwb_ctrl_info info = {0, 0};*/
-/*            for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)*/
-/*            {*/
-/*                pr_debug("Disable HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);*/
-/*                smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);*/
-/*            }*/
-/*#endif*/
-/*        }*/
     }
     else
     {
@@ -226,6 +200,7 @@ static int __init oss_a64fx_hwb_init(void)
     int err = 0;
     int i = 0;
     int j = 0;
+    struct hwb_ctrl_info info = {1, 1};
     struct device *dev = NULL;
     pr_debug("initializing...\n");
 
@@ -270,7 +245,6 @@ static int __init oss_a64fx_hwb_init(void)
     }
 
     pr_debug("init done\n");
-    struct hwb_ctrl_info info = {1, 1};
     for_each_online_cpu(j)
     {
         smp_call_function_single(j, oss_a64fx_hwb_ctrl_func, &info, 1);
@@ -288,8 +262,8 @@ static void __exit oss_a64fx_hwb_exit(void)
     int i = 0;
     int j = 0;
     struct device *dev = NULL;
-    pr_debug("exiting...\n");
     struct hwb_ctrl_info info = {0, 0};
+    pr_debug("exiting...\n");
     for_each_online_cpu(j)
     {
         smp_call_function_single(j, oss_a64fx_hwb_ctrl_func, &info, 1);
