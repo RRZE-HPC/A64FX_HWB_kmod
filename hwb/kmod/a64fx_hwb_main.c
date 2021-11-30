@@ -84,21 +84,17 @@ static int oss_a64fx_hwb_open(struct inode *inode, struct file *file)
     pr_debug("Opening device\n");
     spin_lock(&oss_a64fx_hwb_device.dev_lock);
 
-    if (oss_a64fx_hwb_device.active_count == 0)
-    {
-#ifdef __ARM_ARCH_8A
-        struct hwb_ctrl_info info = {1, 1};
-        for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
-        {
-            pr_debug("Allowing HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
-            for_each_cpu(cpu, &oss_a64fx_hwb_device.cmgs[i].cmgmask)
-            {
-                smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
-/*                pr_debug("Allowing HWB access at CMG%d CPU%d: EL0 %d EL1 %d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id, cpu, info.el0ae, info.el1ae);*/
-            }
-        }
-#endif
-    }
+/*    if (oss_a64fx_hwb_device.active_count == 0)*/
+/*    {*/
+/*#ifdef __ARM_ARCH_8A*/
+/*        struct hwb_ctrl_info info = {1, 1};*/
+/*        for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)*/
+/*        {*/
+/*            pr_debug("Allowing HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);*/
+/*            smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);*/
+/*        }*/
+/*#endif*/
+/*    }*/
     oss_a64fx_hwb_device.active_count++;
     pr_debug("Active Tasks %d\n", oss_a64fx_hwb_device.active_count);
     spin_unlock(&oss_a64fx_hwb_device.dev_lock);
@@ -127,20 +123,17 @@ static int oss_a64fx_hwb_close(struct inode *inode, struct file *file)
             }
         }
 
-        if (oss_a64fx_hwb_device.active_count == 0)
-        {
-#ifdef __ARM_ARCH_8A
-            struct hwb_ctrl_info info = {0, 0};
-            for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
-            {
-                pr_debug("Disable HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);
-                for_each_cpu(cpu, &oss_a64fx_hwb_device.cmgs[i].cmgmask)
-                {
-                    smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);
-                }
-            }
-#endif
-        }
+/*        if (oss_a64fx_hwb_device.active_count == 0)*/
+/*        {*/
+/*#ifdef __ARM_ARCH_8A*/
+/*            struct hwb_ctrl_info info = {0, 0};*/
+/*            for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)*/
+/*            {*/
+/*                pr_debug("Disable HWB access at CMG%d\n", oss_a64fx_hwb_device.cmgs[i].cmg_id);*/
+/*                smp_call_function_many(&oss_a64fx_hwb_device.cmgs[i].cmgmask, oss_a64fx_hwb_ctrl_func, &info, 1);*/
+/*            }*/
+/*#endif*/
+/*        }*/
     }
     else
     {
@@ -277,6 +270,11 @@ static int __init oss_a64fx_hwb_init(void)
     }
 
     pr_debug("init done\n");
+    struct hwb_ctrl_info info = {1, 1};
+    for_each_online_cpu(j)
+    {
+        smp_call_function_single(j, oss_a64fx_hwb_ctrl_func, &info, 1);
+    }
     return err;
 remove_global_sysfs:
     device_remove_file(dev, &dev_attr_hwinfo);
@@ -288,8 +286,14 @@ unreg_miscdev:
 static void __exit oss_a64fx_hwb_exit(void)
 {
     int i = 0;
+    int j = 0;
     struct device *dev = NULL;
     pr_debug("exiting...\n");
+    struct hwb_ctrl_info info = {0, 0};
+    for_each_online_cpu(j)
+    {
+        smp_call_function_single(j, oss_a64fx_hwb_ctrl_func, &info, 1);
+    }
     // Iterate over CMGs and destroy data structures and CMG
     // related sysfs files
     for (i = 0; i < oss_a64fx_hwb_device.num_cmgs; i++)
