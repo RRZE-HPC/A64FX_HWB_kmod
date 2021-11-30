@@ -457,6 +457,7 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
     unsigned long mask = 0;
     int cpu;
     struct cpumask *cpumask;
+    struct cpumask clean_cpumask;
     struct fujitsu_hwb_ioc_bb_ctl ioc_bb_ctl = {0};
     struct fujitsu_hwb_ioc_bb_ctl __user *uarg = (struct fujitsu_hwb_ioc_bb_ctl __user *)arg;
     
@@ -476,12 +477,13 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
         return -EINVAL;
     }
     pr_debug("Read cpumask 0x%lX\n", mask);
+    cpumask_clear(&clean_cpumask);
     cpumask = to_cpumask(&mask);
     for_each_cpu(cpu, cpumask)
-	   {
-		   pr_debug("CPU %d\n", cpu);
-	   } 
-    err = check_cpumask(dev, cpumask);
+    {
+       cpumask_set_cpu(cpu, &clean_cpumask);
+    }
+    err = check_cpumask(dev, &clean_cpumask);
     if (err < 0)
     {
         pr_err("cpumask spans multiple CMGs, contains only a single CPU or contains offline CPUs\n");
@@ -490,7 +492,7 @@ int oss_a64fx_hwb_allocate_ioctl(struct a64fx_hwb_device *dev, unsigned long arg
     cmg_id = err;
     bb_id = (int)ioc_bb_ctl.bb;
     pr_debug("Receive CMG %d and Blade %d from userspace\n", cmg_id, bb_id);
-    err = oss_a64fx_hwb_allocate(dev, cmg_id, cpumask, &bb_id);
+    err = oss_a64fx_hwb_allocate(dev, cmg_id, &clean_cpumask, &bb_id);
     if (err)
     {
         return err;
@@ -560,7 +562,6 @@ int oss_a64fx_hwb_free(struct a64fx_hwb_device *dev, int cmg_id, int blade)
                 struct hwb_allocate_info info = {0, 0UL};
                 if (cpumask_test_cpu(cpuid, &alloc->assign_mask))
                 {
-                    
                     struct hwb_assign_info ainfo = {
                         .cpu = pe->cpu_id,
                         .cmg = alloc->cmg,
@@ -653,6 +654,11 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
     struct task_struct* current_task = get_current();
     struct a64fx_task_mapping* taskmap = NULL;
     struct a64fx_task_allocation* alloc = NULL;
+    if (cpumask_weight(&current_task->cpus_allowed) > 1)
+    {
+        pr_debug("Task in assign not pinned\n");
+        return -EINVAL;
+    }
     
     // acquire lock
     spin_lock(&dev->dev_lock);
@@ -677,6 +683,11 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
         {
             spin_lock(&cmgdev->cmg_lock);
             err = -ENODEV;
+            if (!cpumask_test_cpu(cpuid, &alloc->cpumask))
+            {
+                spin_unlock(&cmgdev->cmg_lock);
+                goto assign_blade_out;
+            }
             if (window < 0)
             {
                 if (alloc->window[pe->ppe_id] == A64FX_HWB_UNASSIGNED_WIN)
@@ -688,11 +699,22 @@ int oss_a64fx_hwb_assign_blade(struct a64fx_hwb_device *dev, int blade, int wind
                 {
                     window = alloc->window[pe->ppe_id];
                     pr_debug("Reuse window %d used by other pe", window);
+                } else {
+                    err = -EINVAL;
+                    spin_unlock(&cmgdev->cmg_lock);
+                    goto assign_blade_out;
                 }
             }
             else
             {
                 pr_debug("User has given window %d\n", window);
+                if (test_bit(window, &pe->bw_map))
+                {
+                    pr_debug("User given window %d already in-use\n", window);
+                    err = -EINVAL;
+                    spin_unlock(&cmgdev->cmg_lock);
+                    goto assign_blade_out;
+                }
             }
             
             if (window >= 0 && window < MAX_BW_PER_CMG && (!test_bit(window, &pe->bw_map)))
@@ -775,6 +797,11 @@ int oss_a64fx_hwb_unassign_blade(struct a64fx_hwb_device *dev, int blade, int wi
     struct task_struct* current_task = get_current();
     struct a64fx_task_mapping* taskmap = NULL;
     struct a64fx_task_allocation* alloc = NULL;
+    if (cpumask_weight(&current_task->cpus_allowed) > 1)
+    {
+        pr_debug("Task in unassign not pinned\n");
+        return -EINVAL;
+    }
 
     spin_lock(&dev->dev_lock);
     cpuid = get_cpu();
