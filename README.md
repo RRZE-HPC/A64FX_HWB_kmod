@@ -73,3 +73,9 @@ $ cd A64FX_HWB_kmod/kmod
 $ make
 $ sudo insmod modules/a64fx_hwb.ko
 ```
+
+# Measurements
+After the implementation, we benchmarked the HWB in comparison to the OpenMP barrier implementations of GCC 11.2.0 and CPE 21.03 (cc 10.0.2) on OOKAMI. The benchmark code can be found in the `benchmark` folder.
+
+![GCC 11.2.0 vs. A64FX HWB](./benchmark/gcc_barrier.png)
+![CPE 21.03 vs. A64FX HWB](./benchmark/cpe_barrier.png)
