@@ -2,21 +2,21 @@
 
 This folder contains the kernel module (`kmod`) and [user-space library](https://github.com/fujitsu/hardware_barrier) (`ulib`) for the A64FX hardware barrier.
 
-Each CMG (core-memory-group) contains 4 barrier blades. Each PE (hardware thread) provides 6 barrier window registers. The registers for the A64FX HWB are documented in the [A64FX HPC Extension](https://github.com/fujitsu/A64FX/blob/master/doc/A64FX_Specification_HPC_Extension_v1_EN.pdf) ([Japanese version](https://github.com/fujitsu/A64FX/blob/master/doc/A64FX_Specification_HPC_Extension_v1_JP.pdf)).
+Each CMG (core-memory-group) contains 6 barrier blades. Each PE (hardware thread) provides 4 barrier window registers. The registers for the A64FX HWB are documented in the [A64FX HPC Extension](https://github.com/fujitsu/A64FX/blob/master/doc/A64FX_Specification_HPC_Extension_v1_EN.pdf) ([Japanese version](https://github.com/fujitsu/A64FX/blob/master/doc/A64FX_Specification_HPC_Extension_v1_JP.pdf)).
 
 # A64FX HWB scheme
 1.  **Initialize BBs**
     Assing PEs to one of the BB in CMG
     ```
-      |     +-----+ +-----+ +-----+ +-----+
-      |     | BB0 | | BB1 | | BB2 | | BB3 |
-      |     +-----+ +-----+ +-----+ +-----+
-    CMG      ^        ^       ^        ^
-      |      | _______|_______|________|
+      |     +-----+ +-----+ +-----+ +-----+ +-----+ +-----+
+      |     | BB0 | | BB1 | | BB2 | | BB3 | | BB4 | | BB5 |
+      |     +-----+ +-----+ +-----+ +-----+ +-----+ +-----+
+    CMG      ^        ^       ^        ^       ^       ^
+      |      | _______|_______|________|_______|_______|
       |      |/
       |     PE[0-12]
     ```
-    by using `write_init_sync_bb(int blade, unsigned long bst_mask)` and setting all BST bits initially to `0`. 
+    by using `write_init_sync_bb(int blade, unsigned long bst_mask)` and setting all BST bits initially to `0`.
 2.  **Assign WRs**
     Assign WRs so that a window maps to a BB
     ```
@@ -24,11 +24,11 @@ Each CMG (core-memory-group) contains 4 barrier blades. Each PE (hardware thread
     CMG     | BBx |
       |     +-----+
                ^
-               |________________________________________
-               |       |       |       |       |       |
-      |     +-----+ +-----+ +-----+ +-----+ +-----+ +-----+
-    PE      | WR0 | | WR1 | | WR2 | | WR3 | | WR4 | | WR5 |
-      |     +-----+ +-----+ +-----+ +-----+ +-----+ +-----+
+               |________________________
+               |       |       |       |
+      |     +-----+ +-----+ +-----+ +-----+
+    PE      | WR0 | | WR1 | | WR2 | | WR3 |
+      |     +-----+ +-----+ +-----+ +-----+
     ```
     by using `write_assign_sync_wr(int window, int valid, int blade)`
 3.  **Do work**
