@@ -1,4 +1,0 @@
-EXTRA_CFLAGS = -Wall -g -I.
-
-obj-m        = klists.o
-klists-objs  = list_module.o

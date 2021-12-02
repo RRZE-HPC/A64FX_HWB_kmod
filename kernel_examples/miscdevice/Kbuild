@@ -1,4 +1,0 @@
-EXTRA_CFLAGS = -Wall -g -I.
-
-obj-m        = miscdev.o
-miscdev-objs  = misc_device.o
