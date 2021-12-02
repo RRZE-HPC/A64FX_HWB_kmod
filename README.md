@@ -65,4 +65,11 @@ The development of `kmod` and its testing was performed on a node of the OOKAMI 
 
 > The authors would like to thank Stony Brook Research Computing and Cyberinfrastructure, and the Institute for Advanced Computational Science at Stony Brook University for access to the innovative high-performance Ookami computing system, which was made possible by a $5M National Science Foundation grant (#1927880).
 
+# Get it
 
+```
+$ git clone --recursive-subdirs git@github.com:RRZE-HPC/A64FX_HWB_kmod.git
+$ cd A64FX_HWB_kmod/kmod
+$ make
+$ sudo insmod modules/a64fx_hwb.ko
+```
