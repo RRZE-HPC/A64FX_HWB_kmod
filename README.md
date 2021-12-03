@@ -1,6 +1,6 @@
 # A64FX Hardware Barrier
 
-This folder contains the kernel module (`kmod`) and [user-space library](https://github.com/fujitsu/hardware_barrier) (`ulib`) for the A64FX hardware barrier.
+This folder contains the kernel module (`kmod`) and [user-space library](https://github.com/fujitsu/hardware_barrier) (`ulib`) for the A64FX hardware barrier. The intention of this module is not to provide the most flexible API but to play nicely together with Fujitsu's library.
 
 Each CMG (core-memory-group) contains 6 barrier blades. Each PE (hardware thread) provides 4 barrier window registers. The registers for the A64FX HWB are documented in the [A64FX HPC Extension](https://github.com/fujitsu/A64FX/blob/master/doc/A64FX_Specification_HPC_Extension_v1_EN.pdf) ([Japanese version](https://github.com/fujitsu/A64FX/blob/master/doc/A64FX_Specification_HPC_Extension_v1_JP.pdf)).
 
@@ -75,7 +75,17 @@ $ sudo insmod modules/a64fx_hwb.ko
 ```
 
 # Measurements
-After the implementation, we benchmarked the HWB in comparison to the OpenMP barrier implementations of GCC 11.2.0 and CPE 21.03 (cc 10.0.2) on OOKAMI. The benchmark code can be found in the `benchmark` folder.
+After the implementation, we benchmarked the HWB in comparison to the OpenMP barrier implementations of GCC 11.2.0 and CPE 21.03 (cc 10.0.2) on OOKAMI. The benchmark code can be found in the `benchmark` folder. It is a syntethic benchmark measuring only the best-case.
 
 ![GCC 11.2.0 vs. A64FX HWB](./benchmark/gcc_barrier.png)
 ![CPE 21.03 vs. A64FX HWB](./benchmark/cpe_barrier.png)
+
+
+# Differences to the Fujitsu hardware barrier module
+At first, I have never seen Fujitsu's implementation so this is based on the README of the [user-space library](https://github.com/fujitsu/hardware_barrier):
+
+* "After fhwb_assign(), BST_SYNC/LBSY_SYNC register becomes accessible from EL0"
+> This kernel module enables the EL0 access at module load and disables it at module unload
+
+* The library header file lists which errors are returned by which function
+> This kernel module uses different error codes but always returns negative values in case of errors.
