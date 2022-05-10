@@ -1,5 +1,7 @@
 # A64FX Hardware Barrier
 
+**Disclaimer:** If you want to use the hardware barrier on A64FX, we recommend to use the _now public_ Linux kernel module [implementation by Misono-san (Fujitsu)](https://lore.kernel.org/linux-arm-kernel/20210108105241.1757799-1-misono.tomohiro@jp.fujitsu.com/).
+
 This folder contains the kernel module (`kmod`) and [user-space library](https://github.com/fujitsu/hardware_barrier) (`ulib`) for the A64FX hardware barrier. The intention of this module is not to provide the most flexible API but to play nicely together with Fujitsu's library.
 
 Each CMG (core-memory-group) contains 6 barrier blades. Each PE (hardware thread) provides 4 barrier window registers. The registers for the A64FX HWB are documented in the [A64FX HPC Extension](https://github.com/fujitsu/A64FX/blob/master/doc/A64FX_Specification_HPC_Extension_v1_EN.pdf) ([Japanese version](https://github.com/fujitsu/A64FX/blob/master/doc/A64FX_Specification_HPC_Extension_v1_JP.pdf)).
